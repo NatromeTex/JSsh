@@ -32,13 +32,19 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
     Get the QuickJS source files (version 2020-11-08 recommended).
     Extract them into /src so you have the quickjs files in /src
 
-2. Build with make:
+2. Add readline dependencies
+    ```bash
+    sudo apt-get install libreadline-dev
+    ```
+    This will install the readline library which is required for command history
+
+3. Build with make:
    ```bash
     make
    ```
    This will compile everything and produce the binary at bin/jssh.
 
-3. Usage
+4. Usage
 
    Run the shell:
     ```bash

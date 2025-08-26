@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE
-LDFLAGS = -lm
+LDFLAGS = -lm -ldl -lreadline -lncurses
 
 SRC = src/main.c \
       src/utils.c \

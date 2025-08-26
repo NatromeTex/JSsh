@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <limits.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "utils.h"
@@ -14,9 +16,13 @@ int main(int argc, char **argv) {
     JSRuntime *rt = JS_NewRuntime();
     JSContext *ctx = JS_NewContext(rt);
     js_std_add_helpers(ctx, argc, argv);
+
     JSValue global_obj = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, global_obj, "cat", JS_NewCFunction(ctx, js_cat, "cat", 1));
     JS_SetPropertyStr(ctx, global_obj, "echo", JS_NewCFunction(ctx, js_echo, "echo", 1));
+    JS_SetPropertyStr(ctx, global_obj, "ls", JS_NewCFunction(ctx, js_ls, "ls", 2));
+    JS_SetPropertyStr(ctx, global_obj, "cd", JS_NewCFunction(ctx, js_cd, "cd", 1));
+
     JS_FreeValue(ctx, global_obj);
 
     detect_color_mode();
@@ -30,25 +36,30 @@ int main(int argc, char **argv) {
 
     char cwd[PATH_MAX];
 
-    char line[1024];
     while (1) {
         if (getcwd(cwd, sizeof(cwd)) == NULL)
             strcpy(cwd, "?");
 
-        printR("{rgb:85,255,85}%s@%s{reset}:{rgb:85,85,255}%s{reset}$ ", username, host, cwd);
-        fflush(stdout);
+        // prompt with readline-safe escapes
+        char prompt[PATH_MAX + 512];
+        snprintf(prompt, sizeof(prompt),
+                 "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
+                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ",
+                 username, host, cwd);
 
-        if (!fgets(line, sizeof(line), stdin)) {
+        char *line = readline(prompt);
+        if (!line) { // EOF (Ctrl-D)
             printf("\n");
             break;
         }
 
-        size_t len = strlen(line);
-        if (len > 0 && line[len-1] == '\n')
-            line[len-1] = 0;
+        if (*line)
+            add_history(line);
 
-        if (strcmp(line, ":quit") == 0)
+        if (strcmp(line, ":quit") == 0) {
+            free(line);
             break;
+        }
 
         JSValue val = JS_Eval(ctx, line, strlen(line), "<repl>", JS_EVAL_TYPE_GLOBAL);
         if (JS_IsException(val)) {
@@ -64,6 +75,7 @@ int main(int argc, char **argv) {
             }
         }
         JS_FreeValue(ctx, val);
+        free(line);
     }
 
     JS_FreeContext(ctx);
