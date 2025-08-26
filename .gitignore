@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Compile target folder
+/bin
+
+# QuickJS dependency
+src/quickjs/
