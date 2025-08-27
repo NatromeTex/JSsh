@@ -1,14 +1,27 @@
 # JSsh
 
-> JavaScript is God’s programming language. Why not use it as your shell too?
+[![My Skills](https://skillicons.dev/icons?i=js,c,linux)](https://skillicons.dev) <br>
+[![GitHub release](https://img.shields.io/github/v/release/NatromeTex/System-Dials)](https://github.com/NatromeTex/System-Dials/releases)
 
+## Contents
+- [About](#about)
+- [Features](#features)
+- [Development](#Development)
+- [Updating](#updating)
+- [Installation](#Installation)
+- [Documentation](#documentation) 
+- [Finally](#closing-words)
+
+
+> JavaScript is God’s scripting language. Why not use it as your shell too?
+
+## About
 `jssh` is a REPL shell built on [QuickJS](https://bellard.org/quickjs/).  
 It gives you a Unix-style shell prompt, but everything you type is JavaScript.  
 Need `cat`? It’s a JS function. Want `echo`? Same deal.  
 
 Because who doesn’t want their shell to throw exceptions instead of exit codes?
 
----
 
 ## Features
 
@@ -18,8 +31,8 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
 - Extensible: drop JS files into a commands directory and extend your shell.  
 - Written in C, powered by QuickJS.  
 - Zero shame in declaring JavaScript the one true language.
+- Update the shell after changes with a single command
 
----
 
 ## Installation
 
@@ -66,12 +79,20 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
    ```
    Use `CTRL+D` to exit.
 
+## Updating
+After editing the code of the project, just run `update()` from the root of the project in JSsh and JSsh will handle the rest for you and jump into the new binary.<br>
+If there are any errors in the compilation, JSsh will print the debug stack and await edits.
+
 ## Development
 
 All code is present in `/src`, entry is in main.c <br>
 Built-ins like cat and echo live in utils.c or func.c. <br>
 Some base level access like read and write file need to be given to JS using C<br>
 Extend by adding more JS-callable functions in C, or by loading .js modules. <br>
+
+## Documentation
+Most OS primitive functions will be exposed to JS in C APIs, once enough syscalls are available in JS, command integration will move to pure JS.<br>
+Refer to `DOCS.md` for a comprehensive list on the supported functions.
 
 ## License
 
@@ -82,7 +103,7 @@ See the full text in LICENSE
 
 ## Closing Words
 
-Use jssh.
+Use JSsh.
 Because a TypeError stack trace at the prompt is way more fun than command not found.
 
 Built with ❤️

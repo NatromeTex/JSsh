@@ -8,5 +8,6 @@ void detect_color_mode(void);
 void setColor(int r, int g, int b);
 void resetColor(void);
 JSValue js_cat(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
 #endif

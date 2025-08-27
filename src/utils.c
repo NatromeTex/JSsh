@@ -1,14 +1,18 @@
 // contains utilities for terminal working such as size, color
 
-#include <stdio.h>
-#include <string.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <limits.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <readline/history.h>
+#include <readline/readline.h>
 #include "utils.h"
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
+const char *history_file = "/home/username/.jssh_history"; // adjust path
 
 // Call this once at startup
 void detect_color_mode(void) {
@@ -94,4 +98,26 @@ void printR(const char *fmt, ...) {
     va_end(args);
 
     render_colors(buf);
+}
+
+JSValue js_update(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv) {
+    // Save current history
+    write_history(history_file);
+
+    // Run make in current directory
+    int ret = system("make");
+    if (ret != 0) {
+        fprintf(stderr, "update: make failed\n");
+        return JS_UNDEFINED;
+    }
+
+    // Replace current process with the newly built binary
+    char *argv0 = "./bin/jssh";   // path to new binary
+    char *args[] = { argv0, NULL };
+    execv(argv0, args);           // replaces current REPL process
+
+    // If execv fails
+    perror("execv");
+    return JS_UNDEFINED;
 }

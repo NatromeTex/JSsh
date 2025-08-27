@@ -4,21 +4,24 @@
 *   as a stepping stone for pure JS commands
 */
 
-#include <limits.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <time.h>
-#include <pwd.h>
 #include <grp.h>
-#include <unistd.h>
+#include <pwd.h>
+#include <time.h>
+#include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
+#include <limits.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "quickjs.h"
 #include "quickjs-libc.h"
+
 
 // return this in a JS_String to suppress the undefined after functions which print directly to console
 #define JS_SUPPRESS "\x1B[JSSH_SUPPRESS" 
 
-// cat command
+// cat
 JSValue js_cat(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv) {
 
@@ -45,7 +48,7 @@ JSValue js_cat(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, JS_SUPPRESS);
 }
 
-// echo command
+// echo
 JSValue js_echo(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv) {
     if (argc < 1) {
@@ -141,8 +144,7 @@ JSValue js_ls(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, JS_SUPPRESS);
 }
 
-// cd command
-
+// cd
 JSValue js_cd(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv) {
     if (argc < 1) {
@@ -159,5 +161,142 @@ JSValue js_cd(JSContext *ctx, JSValueConst this_val,
     }
 
     JS_FreeCString(ctx, path);
+    return JS_UNDEFINED;
+}
+
+// mkdir
+JSValue js_mkdir(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "mkdir: missing path");
+    }
+
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path)
+        return JS_EXCEPTION;
+
+    int mode = 0755; // default permissions
+    if (argc > 1) {
+        int m;
+        if (JS_ToInt32(ctx, &m, argv[1]) == 0) {
+            mode = m & 0777;
+        }
+    }
+
+    int ret = mkdir(path, mode);
+    if (ret != 0) {
+        JS_FreeCString(ctx, path);
+        return JS_ThrowTypeError(ctx, "mkdir: cannot create '%s': %s",
+                                 path, strerror(errno));
+    }
+
+    JS_FreeCString(ctx, path);
+    return JS_NewString(ctx, JS_SUPPRESS);
+}
+
+// touch
+JSValue js_touch(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "touch: missing path");
+    }
+
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path)
+        return JS_EXCEPTION;
+
+    int fd = open(path, O_WRONLY | O_CREAT, 0644);
+    if (fd < 0) {
+        JS_FreeCString(ctx, path);
+        return JS_ThrowTypeError(ctx, "touch: cannot create '%s': %s",
+                                 path, strerror(errno));
+    }
+    close(fd);
+
+    // update mtime to now
+    struct timespec times[2];
+    times[0].tv_nsec = UTIME_NOW; // access time
+    times[1].tv_nsec = UTIME_NOW; // modification time
+    if (utimensat(AT_FDCWD, path, times, 0) != 0) {
+        JS_FreeCString(ctx, path);
+        return JS_ThrowTypeError(ctx, "touch: cannot update time '%s': %s", path, strerror(errno));
+    }
+
+    JS_FreeCString(ctx, path);
+    return JS_NewString(ctx, JS_SUPPRESS);
+}
+
+// rm
+static int rm_path(const char *path, int recursive, int force) {
+    struct stat st;
+    if (lstat(path, &st) != 0) {
+        if (!force)
+            perror(path);
+        return -1;
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+        if (!recursive) {
+            if (!force)
+                fprintf(stderr, "rm: cannot remove '%s': Is a directory\n", path);
+            return -1;
+        }
+        DIR *dir = opendir(path);
+        if (!dir) {
+            if (!force)
+                perror(path);
+            return -1;
+        }
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 ||
+                strcmp(entry->d_name, "..") == 0)
+                continue;
+            char child[PATH_MAX];
+            snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+            rm_path(child, recursive, force);
+        }
+        closedir(dir);
+        if (rmdir(path) != 0 && !force)
+            perror(path);
+    } else {
+        if (unlink(path) != 0 && !force)
+            perror(path);
+    }
+    return 0;
+}
+
+JSValue js_rm(JSContext *ctx, JSValueConst this_val,
+              int argc, JSValueConst *argv) {
+    int recursive = 0;
+    int force = 0;
+    int start = 0;
+
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "rm: missing path");
+    }
+
+    // check for options
+    const char *first = JS_ToCString(ctx, argv[0]);
+    if (!first) return JS_EXCEPTION;
+
+    if (first[0] == '-') {
+        for (size_t i = 1; first[i]; i++) {
+            if (first[i] == 'r') recursive = 1;
+            if (first[i] == 'f') force = 1;
+        }
+        start = 1;
+    }
+    JS_FreeCString(ctx, first);
+
+    if (start >= argc) return JS_UNDEFINED; // nothing to remove
+
+    for (int i = start; i < argc; i++) {
+        const char *path = JS_ToCString(ctx, argv[i]);
+        if (!path) continue;
+        rm_path(path, recursive, force);
+        JS_FreeCString(ctx, path);
+    }
+
     return JS_UNDEFINED;
 }
