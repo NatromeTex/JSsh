@@ -45,6 +45,7 @@ int main(int argc, char **argv) {
     struct passwd *pw = getpwuid(getuid());
     const char *username = pw ? pw->pw_name : "unknown";
 
+    init_history_file(); // sets history path to ~/.jssh_history
     read_history(history_file);  // loads ~/.jssh_history if exists
 
     char host[256];
@@ -61,7 +62,7 @@ int main(int argc, char **argv) {
         char prompt[PATH_MAX + 512];
         snprintf(prompt, sizeof(prompt),
                  "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
-                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ",
+                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002> ",
                  username, host, cwd);
 
         char *line = readline(prompt);

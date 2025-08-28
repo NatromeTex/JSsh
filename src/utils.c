@@ -1,5 +1,6 @@
 // contains utilities for terminal working such as size, color
 
+#include <pwd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -12,7 +13,20 @@
 #include "utils.h"
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
-const char *history_file = "/home/username/.jssh_history"; // adjust path
+
+// History path setup
+// Call this at startup
+char history_path[PATH_MAX];
+const char *history_file = NULL;
+
+void init_history_file(void) {
+    struct passwd *pw = getpwuid(getuid());
+    const char *homedir = pw ? pw->pw_dir : getenv("HOME");
+    if (!homedir) homedir = ".";
+
+    snprintf(history_path, sizeof(history_path), "%s/.jssh_history", homedir);
+    history_file = history_path;
+}
 
 // Call this once at startup
 void detect_color_mode(void) {
@@ -100,8 +114,7 @@ void printR(const char *fmt, ...) {
     render_colors(buf);
 }
 
-JSValue js_update(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv) {
+JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     // Save current history
     write_history(history_file);
 
