@@ -11,6 +11,7 @@
 #include "quickjs-libc.h"
 #include "utils.h"
 #include "func.h"
+#include "sys.h"
 
 extern const char *history_file;
 
@@ -29,8 +30,13 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, global_obj, "mkdir", JS_NewCFunction(ctx, js_mkdir, "mkdir", 2));
     JS_SetPropertyStr(ctx, global_obj, "touch", JS_NewCFunction(ctx, js_touch, "touch", 1));
     JS_SetPropertyStr(ctx, global_obj, "rm", JS_NewCFunction(ctx, js_rm, "rm", 10));
+    JS_SetPropertyStr(ctx, global_obj, "chmod", JS_NewCFunction(ctx, js_chmod, "chmod", 2));
+    JS_SetPropertyStr(ctx, global_obj, "js", JS_NewCFunction(ctx, js_runfile, "js", 1));
     JS_SetPropertyStr(ctx, global_obj, "update", JS_NewCFunction(ctx, js_update, "update", 0));
 
+
+    // Init syscalls for pure js commands
+    js_init_sys(ctx);
 
     JS_FreeValue(ctx, global_obj);
 

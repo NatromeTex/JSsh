@@ -5,6 +5,7 @@ LDFLAGS = -lm -ldl -lreadline -lncurses
 SRC = src/main.c \
       src/utils.c \
       src/func.c \
+      src/sys.c \
       src/quickjs/quickjs.c \
       src/quickjs/quickjs-libc.c \
       src/quickjs/cutils.c \

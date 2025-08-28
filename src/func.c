@@ -298,5 +298,61 @@ JSValue js_rm(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, path);
     }
 
-    return JS_UNDEFINED;
+    return JS_NewString(ctx, JS_SUPPRESS);
+}
+
+
+// chmod
+JSValue js_chmod(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "chmod requires path and mode");
+    }
+
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path) {
+        return JS_EXCEPTION;
+    }
+
+    int mode;
+    if (JS_ToInt32(ctx, &mode, argv[1])) {
+        JS_FreeCString(ctx, path);
+        return JS_ThrowTypeError(ctx, "invalid mode");
+    }
+
+    int ret = chmod(path, (mode_t)mode);
+    JS_FreeCString(ctx, path);
+
+    if (ret != 0) {
+        return JS_ThrowInternalError(ctx, "chmod failed: %s", strerror(errno));
+    }
+
+    return JS_NewString(ctx, JS_SUPPRESS);
+}
+
+// js
+JSValue js_runfile(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "js(path) requires a filename");
+    }
+
+    const char *filename = JS_ToCString(ctx, argv[0]);
+    if (!filename) {
+        return JS_EXCEPTION;
+    }
+
+    size_t buf_len;
+    uint8_t *buf = js_load_file(ctx, &buf_len, filename);
+    if (!buf) {
+        JS_FreeCString(ctx, filename);
+        return JS_ThrowReferenceError(ctx, "cannot open '%s'", filename);
+    }
+
+    JSValue result = JS_Eval(ctx, (const char *)buf, buf_len, filename,
+                             JS_EVAL_TYPE_GLOBAL);
+
+    js_free(ctx, buf);
+    JS_FreeCString(ctx, filename);
+    return result;
 }

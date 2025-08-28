@@ -112,6 +112,45 @@ rm("dir", "rf")         // remove directory recursively and force
 
 ---
 
+## `chmod(path, octal)`
+
+* **Description**: Changes the permissions of the specified file. Requires an int number in the standard unix octals.
+* **Parameters**:
+
+  * `path` (string): Path to file whose permissions need to be modified.
+  * `octal` (int): Permissions in numeric notation.
+* **Examples**:
+
+```js
+chmod("file.txt", 755)          // grant read, write and execute to owner and read and execute to others
+chmod("file.txt", 444)          // file read-only for all
+```
+
+---
+## `js()`
+
+* **Description**: Similar to `sh` command in normal shell. Executes a js file in JSsh, the js file being executed has access to all the above functions and any function defined using JS in `/js/lib`
+* **Parameters**:
+  
+  * `path` (string): Path to js file which needs to be executed.
+* **Examples**:
+
+```js
+// script.js
+echo("Hello from script.js!");
+ls(".", "l");
+echo("Files above ");
+
+function greet(name) {
+    return "Hi " + name + "!";
+}
+
+echo(greet("world"));
+
+// in JSsh
+js("script.js")
+```
+---
 ## `update()`
 
 * **Description**: Rebuilds the JSSH binary using `make` in the current folder and replaces the running REPL process with the newly built binary. History is preserved across the update.
