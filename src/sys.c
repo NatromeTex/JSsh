@@ -1,14 +1,17 @@
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <sys/stat.h>
-#include <dirent.h>
-#include <limits.h>
-#include "quickjs.h"
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "sys.h"
+#include "quickjs.h"
 
 // sys.open(path, flags, mode)
 static JSValue js_sys_open(JSContext *ctx, JSValueConst this_val,
@@ -168,4 +171,144 @@ void js_init_sys(JSContext *ctx) {
 
     JS_SetPropertyStr(ctx, global_obj, "sys", sys);
     JS_FreeValue(ctx, global_obj);
+}
+
+
+// ENV file configuration
+typedef struct {
+    char *key;
+    char *value;
+} EnvEntry;
+
+static EnvEntry *g_env = NULL;
+static size_t g_env_count = 0;
+
+// default settings
+static const char *default_env[] = {
+    "color_dir={blue}",
+    "color_exe={green}",
+    "color_link={cyan}",
+    "color_fifo={yellow}",
+    "color_sock={magenta}",
+    "color_chr={red}",
+    "color_blk={red}",
+    "color_reg={white}",
+    NULL
+};
+
+// add to env file
+static void env_add(const char *key, const char *value) {
+    g_env = realloc(g_env, (g_env_count + 1) * sizeof(EnvEntry));
+    g_env[g_env_count].key = strdup(key);
+    g_env[g_env_count].value = strdup(value);
+    g_env_count++;
+}
+
+// read setting from env file
+const char *env_get(const char *key, const char *def) {
+    for (size_t i = 0; i < g_env_count; i++) {
+        if (strcmp(g_env[i].key, key) == 0)
+            return g_env[i].value;
+    }
+    return def;
+}
+
+// call at startup to load the env file
+void env_load(const char *filename) {
+    struct stat st;
+    if (stat(filename, &st) != 0) {
+        // file missing → create with defaults
+        FILE *f = fopen(filename, "w");
+        if (!f) return;
+        for (const char **p = default_env; *p; p++) {
+            fprintf(f, "%s\n", *p);
+            char key[64], val[128];
+            if (sscanf(*p, "%63[^=]=%127[^\n]", key, val) == 2) {
+                env_add(key, val);
+            }
+        }
+        fclose(f);
+        return;
+    }
+
+    // load existing file
+    FILE *f = fopen(filename, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        char key[64], val[128];
+        if (sscanf(line, "%63[^=]=%127[^\n]", key, val) == 2) {
+            env_add(key, val);
+        }
+    }
+    fclose(f);
+}
+
+// show contents of env file
+void env_show(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        printf("cannot open %s: %s\n", filename, strerror(errno));
+        return;
+    }
+    char buf[256];
+    while (fgets(buf, sizeof(buf), f)) {
+        fputs(buf, stdout);
+    }
+    fclose(f);
+}
+
+// QOL updates
+
+// ("") autocomplete
+static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", NULL };
+
+static int is_autoquote_cmd(const char *tok) {
+    for (int i = 0; autoquote_cmds[i]; i++)
+        if (strcmp(tok, autoquote_cmds[i]) == 0) return 1;
+    return 0;
+}
+
+static int jssh_tab_handler(int count, int key) {
+    (void)count; (void)key;
+
+    char *buf = rl_line_buffer;
+    int p = rl_point, len = rl_end;
+
+    // find first token
+    int i = 0; while (i < len && isspace((unsigned char)buf[i])) i++;
+    int start = i;
+    while (i < len && !isspace((unsigned char)buf[i]) && buf[i] != '(') i++;
+    int tok_end = i;
+
+    // token string
+    char tok[64] = {0};
+    int tlen = tok_end - start;
+    if (tlen <= 0 || tlen >= (int)sizeof(tok)) { rl_complete(0, 0); return 0; }
+    memcpy(tok, buf + start, tlen); tok[tlen] = 0;
+
+    // only when cursor is at end of token (ignoring trailing spaces)
+    int j = tok_end; while (j < len && isspace((unsigned char)buf[j])) j++;
+    if (!is_autoquote_cmd(tok) || p != tok_end || (j < len && buf[j] == '(')) {
+        // fallback to normal completion
+        rl_complete(0, 0);
+        return 0;
+    }
+
+    // remove trailing spaces after token
+    if (tok_end < len && j > tok_end) {
+        rl_point = tok_end;
+        rl_delete_text(tok_end, j);
+        rl_point = tok_end;
+    }
+
+    // insert ("")
+    rl_insert_text("(\"\")");
+    rl_point -= 2; // place cursor between the quotes
+    return 0;
+}
+
+void init_qol_bindings(void) {
+    rl_bind_key('\t', jssh_tab_handler);
 }

@@ -8,8 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include "sys.h"
 #include "utils.h"
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
@@ -114,6 +116,22 @@ void printR(const char *fmt, ...) {
     render_colors(buf);
 }
 
+void print_name(const char *name, mode_t mode) {
+    const char *color = NULL;
+
+    if (S_ISDIR(mode))       color = env_get("color_dir", "{blue}");
+    else if (S_ISLNK(mode))  color = env_get("color_link", "{cyan}");
+    else if (S_ISFIFO(mode)) color = env_get("color_fifo", "{yellow}");
+    else if (S_ISSOCK(mode)) color = env_get("color_sock", "{magenta}");
+    else if (S_ISCHR(mode))  color = env_get("color_chr", "{red}");
+    else if (S_ISBLK(mode))  color = env_get("color_blk", "{red}");
+    else if (mode & S_IXUSR) color = env_get("color_exe", "{green}");
+    else                     color = env_get("color_reg", "{white}");
+
+    printR("%s%s{reset}", color, name);
+}
+
+// update
 JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     // Save current history
     write_history(history_file);
@@ -132,5 +150,19 @@ JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 
     // If execv fails
     perror("execv");
+    return JS_UNDEFINED;
+}
+
+// show_env
+JSValue js_show_env(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    const char *home = getenv("HOME");
+    if (!home) {
+        struct passwd *pw = getpwuid(getuid());
+        home = pw ? pw->pw_dir : ".";
+    }
+    char envpath[512];
+    snprintf(envpath, sizeof(envpath), "%s/.jssh_env", home);
+
+    env_show(envpath);
     return JS_UNDEFINED;
 }

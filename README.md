@@ -1,7 +1,8 @@
 # JSsh
 
 [![My Skills](https://skillicons.dev/icons?i=js,c,linux)](https://skillicons.dev) <br>
-[![GitHub release](https://img.shields.io/github/v/release/NatromeTex/System-Dials)](https://github.com/NatromeTex/System-Dials/releases)
+![GitHub Release](https://img.shields.io/github/v/release/NatromeTex/JSsh?include_prereleases)
+
 
 ## Contents
 - [About](#about)
@@ -28,10 +29,12 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
 - Run JavaScript interactively at a prompt.  
 - Unix commands are now JS functions.  
 - Supports as many colors as your terminal provides.  
-- Extensible: drop JS files into a commands directory and extend your shell.  
-- Written in C, powered by QuickJS.  
-- Zero shame in declaring JavaScript the one true language.
+- Extensible: drop JS files into a commands directory and extend your shell.
+- Make it your own by editing the configuration file at `~/.jssh_env`. 
+- Don't like adding `("")` after commands? Press `tab` after writing a command like ls for autocomplete!
+- Written in C, powered by QuickJS.
 - Update the shell after changes with a single command
+- Zero shame in declaring JavaScript the one true language.
 
 
 ## Installation

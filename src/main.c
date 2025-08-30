@@ -32,6 +32,8 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, global_obj, "rm", JS_NewCFunction(ctx, js_rm, "rm", 10));
     JS_SetPropertyStr(ctx, global_obj, "chmod", JS_NewCFunction(ctx, js_chmod, "chmod", 2));
     JS_SetPropertyStr(ctx, global_obj, "js", JS_NewCFunction(ctx, js_runfile, "js", 1));
+    JS_SetPropertyStr(ctx, global_obj, "show_env", JS_NewCFunction(ctx, js_show_env, "show_env", 0));
+    JS_SetPropertyStr(ctx, global_obj, "clear", JS_NewCFunction(ctx, js_clear, "clear", 0));
     JS_SetPropertyStr(ctx, global_obj, "update", JS_NewCFunction(ctx, js_update, "update", 0));
 
 
@@ -40,13 +42,27 @@ int main(int argc, char **argv) {
 
     JS_FreeValue(ctx, global_obj);
 
+    // Get color mode of terminal
     detect_color_mode();
 
+    // Init keybindings for autocomplete
+    init_qol_bindings();
+
     struct passwd *pw = getpwuid(getuid());
+    const char *home = getenv("HOME");
+    if (!home) {
+        struct passwd *pw = getpwuid(getuid());
+        home = pw ? pw->pw_dir : ".";
+    }
     const char *username = pw ? pw->pw_name : "unknown";
 
     init_history_file(); // sets history path to ~/.jssh_history
     read_history(history_file);  // loads ~/.jssh_history if exists
+
+    // load env file for settings
+    char envpath[512];
+    snprintf(envpath, sizeof(envpath), "%s/.jssh_env", home);
+    env_load(envpath);
 
     char host[256];
     if (gethostname(host, sizeof(host)) != 0)
@@ -62,7 +78,7 @@ int main(int argc, char **argv) {
         char prompt[PATH_MAX + 512];
         snprintf(prompt, sizeof(prompt),
                  "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
-                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002> ",
+                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ",
                  username, host, cwd);
 
         char *line = readline(prompt);

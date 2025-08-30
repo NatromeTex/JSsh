@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include "quickjs.h"
 #include "quickjs-libc.h"
+#include "utils.h"
 
 
 // return this in a JS_String to suppress the undefined after functions which print directly to console
@@ -117,23 +118,32 @@ JSValue js_ls(JSContext *ctx, JSValueConst this_val,
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') continue;
 
-        if (flag && strcmp(flag, "l") == 0) {
-            char fullpath[PATH_MAX];
-            snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
-            struct stat st;
-            if (stat(fullpath, &st) == 0) {
-                print_perms(st.st_mode);
-                printf("%5ld ", (long)st.st_size);
+        char fullpath[PATH_MAX];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
 
-                char timebuf[64];
-                strftime(timebuf, sizeof(timebuf), "%b %d %H:%M",
-                         localtime(&st.st_mtime));
-                printf("%s %s\n", timebuf, entry->d_name);
-            }
+        struct stat st;
+        if (stat(fullpath, &st) != 0)
+            continue;
+
+        if (flag && strcmp(flag, "l") == 0) {
+            print_perms(st.st_mode);
+            printf("%5ld ", (long)st.st_size);
+
+            char timebuf[64];
+            strftime(timebuf, sizeof(timebuf), "%b %d %H:%M",
+                     localtime(&st.st_mtime));
+            printf("%s ", timebuf);
+
+            // colored name
+            print_name(entry->d_name, st.st_mode);
+            printf("\n");
         } else {
-            printf("%s  ", entry->d_name);
+            // colored name
+            print_name(entry->d_name, st.st_mode);
+            printf("  ");
         }
     }
+
     if (!(flag && strcmp(flag, "l") == 0))
         printf("\n");
 
@@ -355,4 +365,11 @@ JSValue js_runfile(JSContext *ctx, JSValueConst this_val,
     js_free(ctx, buf);
     JS_FreeCString(ctx, filename);
     return result;
+}
+
+// clear
+JSValue js_clear(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    fputs("\033[2J\033[H", stdout);
+    fflush(stdout);
+    return JS_NewString(ctx, JS_SUPPRESS);
 }

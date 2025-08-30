@@ -4,6 +4,17 @@ This document lists the built-in OS-level commands exposed in the JSSH REPL. All
 
 ---
 
+## `clear()`
+
+* **Description**: Clears the screen.
+* **Parameters**: None
+* **Example**:
+
+```js
+clear()
+```
+
+---
 ## `cat(path)`
 
 * **Description**: Prints the contents of a file to stdout.
@@ -35,6 +46,7 @@ echo("Hello, World!")
 ## `ls(path, flag)`
 
 * **Description**: Lists the contents of a directory.
+* **Feature**: Color codes by file/directory type.
 * **Parameters**:
 
   * `path` (string, optional, default `"./"`): Directory path to list.
@@ -150,6 +162,17 @@ echo(greet("world"));
 // in JSsh
 js("script.js")
 ```
+---
+## `show_env()`
+
+* **Description**: Shows the current environment settings for `JSsh`.
+* **Parameters**: None
+* **Example**:
+
+```js
+show_env()
+```
+
 ---
 ## `update()`
 
