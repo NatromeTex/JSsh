@@ -14,8 +14,9 @@ SRC = src/main.c \
       src/quickjs/dtoa.c
 
 OBJ = $(SRC:.c=.o)
+JSFILES := $(wildcard js/lib/*.js)
 
-bin/jssh: $(OBJ)
+bin/jssh: $(OBJ) $(JSFILES)
 	@mkdir -p bin
 	$(CC) -o $@ $(OBJ) $(LDFLAGS)
 

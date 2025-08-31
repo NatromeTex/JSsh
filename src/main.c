@@ -33,14 +33,19 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, global_obj, "chmod", JS_NewCFunction(ctx, js_chmod, "chmod", 2));
     JS_SetPropertyStr(ctx, global_obj, "js", JS_NewCFunction(ctx, js_runfile, "js", 1));
     JS_SetPropertyStr(ctx, global_obj, "show_env", JS_NewCFunction(ctx, js_show_env, "show_env", 0));
+    JS_SetPropertyStr(ctx, global_obj, "env_get", JS_NewCFunction(ctx, js_env_get, "env_get", 1));
+    JS_SetPropertyStr(ctx, global_obj, "env_add", JS_NewCFunction(ctx, js_env_add, "env_add", 2));
     JS_SetPropertyStr(ctx, global_obj, "clear", JS_NewCFunction(ctx, js_clear, "clear", 0));
     JS_SetPropertyStr(ctx, global_obj, "update", JS_NewCFunction(ctx, js_update, "update", 0));
 
 
-    // Init syscalls for pure js commands
+    // Init syscalls for pure JS commands
     js_init_sys(ctx);
 
     JS_FreeValue(ctx, global_obj);
+
+    // Load the pure JS commands
+    load_js_libs(ctx, "./js/lib");
 
     // Get color mode of terminal
     detect_color_mode();
@@ -59,7 +64,7 @@ int main(int argc, char **argv) {
     init_history_file(); // sets history path to ~/.jssh_history
     read_history(history_file);  // loads ~/.jssh_history if exists
 
-    // load env file for settings
+    // Load env file for settings
     char envpath[512];
     snprintf(envpath, sizeof(envpath), "%s/.jssh_env", home);
     env_load(envpath);
@@ -74,7 +79,7 @@ int main(int argc, char **argv) {
         if (getcwd(cwd, sizeof(cwd)) == NULL)
             strcpy(cwd, "?");
 
-        // prompt with readline-safe escapes
+        // Prompt with readline-safe escapes
         char prompt[PATH_MAX + 512];
         snprintf(prompt, sizeof(prompt),
                  "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
@@ -103,7 +108,8 @@ int main(int argc, char **argv) {
             const char *str = JS_ToCString(ctx, val);
             if (str) {
                 if (strcmp(str, "undefined") != 0 &&
-                    strcmp(str, "\x1B[JSSH_SUPPRESS") != 0) {
+                    strcmp(str, "\x1B[JSSH_SUPPRESS") != 0) { 
+                    // Remove the undefined after certain functions
                     printf("%s\n", str);
                 }
                 JS_FreeCString(ctx, str);

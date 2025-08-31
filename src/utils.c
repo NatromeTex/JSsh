@@ -3,6 +3,7 @@
 #include <pwd.h>
 #include <errno.h>
 #include <stdio.h>
+#include <dirent.h>
 #include <stdarg.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -164,5 +165,108 @@ JSValue js_show_env(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
     snprintf(envpath, sizeof(envpath), "%s/.jssh_env", home);
 
     env_show(envpath);
+    return JS_UNDEFINED;
+}
+
+// import JS command files
+void load_js_file(JSContext *ctx, const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        printR("{red}Failed to open %s{reset}\n", path);
+        return;
+    }
+
+    struct stat st;
+    if (fstat(fileno(f), &st) < 0) {
+        printR("{red}fstat failed on %s{reset}\n", path);
+        fclose(f);
+        return;
+    }
+
+    char *buf = malloc(st.st_size + 1);
+    if (!buf) {
+        printR("{red}Out of memory while loading %s{reset}\n", path);
+        fclose(f);
+        return;
+    }
+
+    size_t nread = fread(buf, 1, st.st_size, f);
+    fclose(f);
+    if (nread != (size_t)st.st_size) {
+        printR("{red}Short read while loading %s{reset}\n", path);
+        free(buf);
+        return;
+    }
+    buf[st.st_size] = '\0';
+
+    JSValue val = JS_Eval(ctx, buf, st.st_size, path, JS_EVAL_TYPE_GLOBAL);
+    free(buf);
+
+    if (JS_IsException(val)) {
+        printR("{red}JS error in %s{reset}\n", path);
+        JSValue exc = JS_GetException(ctx);
+        const char *msg = JS_ToCString(ctx, exc);
+        if (msg) {
+            printR("{yellow}%s{reset}\n", msg);
+            JS_FreeCString(ctx, msg);
+        }
+        JS_FreeValue(ctx, exc);
+        JS_FreeValue(ctx, val);
+        return;
+    }
+
+    JS_FreeValue(ctx, val);
+}
+
+void load_js_libs(JSContext *ctx, const char *dirpath) {
+    DIR *dir = opendir(dirpath);
+    if (!dir) {
+        perror("opendir js/lib");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG) {
+            const char *name = entry->d_name;
+            size_t len = strlen(name);
+            if (len > 3 && strcmp(name + len - 3, ".js") == 0) {
+                char path[PATH_MAX];
+                snprintf(path, sizeof(path), "%s/%s", dirpath, name);
+                printf("[JSsh] Loading %s\n", path);
+                load_js_file(ctx, path);
+            }
+        }
+    }
+    closedir(dir);
+}
+
+// env_get
+JSValue js_env_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (!key) return JS_EXCEPTION;
+
+    const char *val = env_get(key, NULL);
+    JS_FreeCString(ctx, key);
+
+    if (!val) return JS_UNDEFINED;
+    return JS_NewString(ctx, val);
+}
+
+// env_add
+JSValue js_env_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    const char *key = JS_ToCString(ctx, argv[0]);
+    const char *val = JS_ToCString(ctx, argv[1]);
+    if (!key || !val) {
+        if (key) JS_FreeCString(ctx, key);
+        if (val) JS_FreeCString(ctx, val);
+        return JS_EXCEPTION;
+    }
+
+    env_add(key, val);
+
+    JS_FreeCString(ctx, key);
+    JS_FreeCString(ctx, val);
+
     return JS_UNDEFINED;
 }

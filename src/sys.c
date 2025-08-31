@@ -197,7 +197,7 @@ static const char *default_env[] = {
 };
 
 // add to env file
-static void env_add(const char *key, const char *value) {
+void env_add(const char *key, const char *value) {
     g_env = realloc(g_env, (g_env_count + 1) * sizeof(EnvEntry));
     g_env[g_env_count].key = strdup(key);
     g_env[g_env_count].value = strdup(value);

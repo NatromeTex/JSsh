@@ -163,6 +163,18 @@ echo(greet("world"));
 js("script.js")
 ```
 ---
+## `date()`
+
+* **Description**: Prints out a simple date-time string.
+* **Parameters**: None
+* **Example**:
+```js
+date()
+// It is Sun, Aug 31st, 2025 00:03:31 GMT+0000
+```
+This is the first pure JS command added to `JSsh`.
+
+---
 ## `show_env()`
 
 * **Description**: Shows the current environment settings for `JSsh`.
