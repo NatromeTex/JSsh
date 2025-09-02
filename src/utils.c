@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <readline/history.h>
 #include <readline/readline.h>
-#include "sys.h"
+#include "env.h"
 #include "utils.h"
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
@@ -269,4 +269,58 @@ JSValue js_env_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     JS_FreeCString(ctx, val);
 
     return JS_UNDEFINED;
+}
+
+// QOL updates
+
+// ("") autocomplete
+static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", NULL };
+
+static int is_autoquote_cmd(const char *tok) {
+    for (int i = 0; autoquote_cmds[i]; i++)
+        if (strcmp(tok, autoquote_cmds[i]) == 0) return 1;
+    return 0;
+}
+
+static int jssh_tab_handler(int count, int key) {
+    (void)count; (void)key;
+
+    char *buf = rl_line_buffer;
+    int p = rl_point, len = rl_end;
+
+    // find first token
+    int i = 0; while (i < len && isspace((unsigned char)buf[i])) i++;
+    int start = i;
+    while (i < len && !isspace((unsigned char)buf[i]) && buf[i] != '(') i++;
+    int tok_end = i;
+
+    // token string
+    char tok[64] = {0};
+    int tlen = tok_end - start;
+    if (tlen <= 0 || tlen >= (int)sizeof(tok)) { rl_complete(0, 0); return 0; }
+    memcpy(tok, buf + start, tlen); tok[tlen] = 0;
+
+    // only when cursor is at end of token (ignoring trailing spaces)
+    int j = tok_end; while (j < len && isspace((unsigned char)buf[j])) j++;
+    if (!is_autoquote_cmd(tok) || p != tok_end || (j < len && buf[j] == '(')) {
+        // fallback to normal completion
+        rl_complete(0, 0);
+        return 0;
+    }
+
+    // remove trailing spaces after token
+    if (tok_end < len && j > tok_end) {
+        rl_point = tok_end;
+        rl_delete_text(tok_end, j);
+        rl_point = tok_end;
+    }
+
+    // insert ("")
+    rl_insert_text("(\"\")");
+    rl_point -= 2; // place cursor between the quotes
+    return 0;
+}
+
+void init_qol_bindings(void) {
+    rl_bind_key('\t', jssh_tab_handler);
 }

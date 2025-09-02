@@ -1,17 +1,18 @@
 // repl.c
+#include <pwd.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pwd.h>
-#include <limits.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include "env.h"
+#include "sys.h"
+#include "func.h"
+#include "utils.h"
 #include "quickjs.h"
 #include "quickjs-libc.h"
-#include "utils.h"
-#include "func.h"
-#include "sys.h"
 
 extern const char *history_file;
 

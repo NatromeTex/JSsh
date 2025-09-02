@@ -1,6 +1,6 @@
 # JSSH OS Primitive Commands
 
-This document lists the built-in OS-level commands exposed in the JSSH REPL. All commands are implemented in **native C** and callable from the REPL. They do **not** invoke an external shell unless explicitly noted.
+This document lists the built-in OS-level commands exposed in the JSSH REPL. Most commands are implemented in **native C** and callable from the REPL. They do **not** invoke an external shell unless explicitly noted.
 
 ---
 
@@ -206,7 +206,5 @@ update()
 ---
 
 ### Notes
-
-* All commands are implemented **natively in C** using POSIX/syscalls.
 * No shell invocation occurs for these commands (`system()` is only used internally in `update()` for convenience).
 * These primitives form the foundation for building more complex shell-like scripts in JSSH.
