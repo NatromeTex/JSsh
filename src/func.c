@@ -49,6 +49,91 @@ JSValue js_cat(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, JS_SUPPRESS);
 }
 
+// tac
+JSValue js_tac(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "tac(path)");
+
+    const char *path = JS_ToCString(ctx, argv[0]);
+    if (!path)
+        return JS_EXCEPTION;
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        JS_FreeCString(ctx, path);
+        return JS_ThrowTypeError(ctx, "fopen failed: %s", strerror(errno));
+    }
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        JS_FreeCString(ctx, path);
+        return JS_ThrowInternalError(ctx, "fseek failed: %s", strerror(errno));
+    }
+
+    long pos = ftell(f);
+    if (pos < 0) {
+        fclose(f);
+        JS_FreeCString(ctx, path);
+        return JS_ThrowInternalError(ctx, "ftell failed: %s", strerror(errno));
+    }
+
+    const size_t bufsize = 4096;
+    char buf[bufsize];
+    long offset = pos;
+    long line_end = pos;
+
+    while (offset > 0) {
+        size_t chunk = (offset >= bufsize) ? bufsize : offset;
+        offset -= chunk;
+        if (fseek(f, offset, SEEK_SET) != 0)
+            break;
+
+        size_t n = fread(buf, 1, chunk, f);
+        if (n == 0) break; // EOF or error
+
+        for (long i = n - 1; i >= 0; i--) {
+            if (buf[i] == '\n') {
+                long line_start = offset + i + 1;
+                long line_len = line_end - line_start;
+                if (line_len > 0) {
+                    char *line = malloc(line_len + 1);
+                    if (!line) continue;
+                    if (fseek(f, line_start, SEEK_SET) == 0) {
+                        size_t got = fread(line, 1, line_len, f);
+                        if (got == (size_t)line_len) {
+                            line[line_len] = '\0';
+                            fwrite(line, 1, line_len, stdout);
+                            fputc('\n', stdout);
+                        }
+                    }
+                    free(line);
+                }
+                line_end = offset + i;
+            }
+        }
+    }
+
+    // First line (if not newline terminated)
+    if (line_end > 0) {
+        char *line = malloc(line_end + 1);
+        if (line) {
+            if (fseek(f, 0, SEEK_SET) == 0) {
+                size_t got = fread(line, 1, line_end, f);
+                if (got == (size_t)line_end) {
+                    line[line_end] = '\0';
+                    fwrite(line, 1, line_end, stdout);
+                    fputc('\n', stdout);
+                }
+            }
+            free(line);
+        }
+    }
+
+    fclose(f);
+    JS_FreeCString(ctx, path);
+    return JS_NewString(ctx, JS_SUPPRESS);
+}
+
 // echo
 JSValue js_echo(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv) {

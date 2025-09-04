@@ -13,6 +13,10 @@
 #include "utils.h"
 #include "quickjs.h"
 #include "quickjs-libc.h"
+#include "utils.h"
+#include "func.h"
+#include "sys.h"
+#include "env.h"
 
 extern const char *history_file;
 
@@ -24,7 +28,9 @@ int main(int argc, char **argv) {
     JSValue global_obj = JS_GetGlobalObject(ctx);
 
     // Init all os primitives in JS
+    JS_SetPropertyStr(ctx, global_obj, "printR", JS_NewCFunction(ctx, js_printR, "printR", 1));
     JS_SetPropertyStr(ctx, global_obj, "cat", JS_NewCFunction(ctx, js_cat, "cat", 1));
+    JS_SetPropertyStr(ctx, global_obj, "tac", JS_NewCFunction(ctx, js_tac, "tac", 1));
     JS_SetPropertyStr(ctx, global_obj, "echo", JS_NewCFunction(ctx, js_echo, "echo", 1));
     JS_SetPropertyStr(ctx, global_obj, "ls", JS_NewCFunction(ctx, js_ls, "ls", 2));
     JS_SetPropertyStr(ctx, global_obj, "cd", JS_NewCFunction(ctx, js_cd, "cd", 1));
@@ -52,7 +58,7 @@ int main(int argc, char **argv) {
     detect_color_mode();
 
     // Init keybindings for autocomplete
-    init_qol_bindings();
+    init_qol_bindings();  
 
     struct passwd *pw = getpwuid(getuid());
     const char *home = getenv("HOME");

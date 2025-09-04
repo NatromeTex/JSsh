@@ -1,9 +1,11 @@
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include "env.h"
+#include "sys.h"
+#include "utils.h"
+#include "quickjs.h"
 
 // ENV file configuration
 typedef struct {

@@ -12,6 +12,10 @@
 #include <sys/stat.h>
 #include <readline/history.h>
 #include <readline/readline.h>
+<<<<<<< HEAD
+=======
+#include "sys.h"
+>>>>>>> bea3155 (Moved env logic to env.ch/env.h)
 #include "env.h"
 #include "utils.h"
 
@@ -271,10 +275,31 @@ JSValue js_env_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     return JS_UNDEFINED;
 }
 
+<<<<<<< HEAD
 // QOL updates
 
 // ("") autocomplete
 static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", NULL };
+=======
+// printR
+JSValue js_printR(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "printR(string)");
+
+    const char *str = JS_ToCString(ctx, argv[0]);
+    if (!str) return JS_EXCEPTION;
+
+    printR("%s", str);
+    JS_FreeCString(ctx, str);
+
+    return JS_UNDEFINED;
+}
+
+// QOL updates
+
+// ("") autocomplete
+static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac",NULL };
+>>>>>>> bea3155 (Moved env logic to env.ch/env.h)
 
 static int is_autoquote_cmd(const char *tok) {
     for (int i = 0; autoquote_cmds[i]; i++)
@@ -323,4 +348,8 @@ static int jssh_tab_handler(int count, int key) {
 
 void init_qol_bindings(void) {
     rl_bind_key('\t', jssh_tab_handler);
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> bea3155 (Moved env logic to env.ch/env.h)
