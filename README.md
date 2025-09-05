@@ -43,7 +43,7 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
 1. Clone this repo:
 
    ```bash
-   git clone https://github.com/yourname/jssh.git
+   git clone https://github.com/NatromeTex/jssh.git
    cd jssh
    ```
     Get the QuickJS source files (version 2020-11-08 recommended).

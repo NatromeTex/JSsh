@@ -3,6 +3,8 @@
 
 #include "quickjs.h"
 
+extern int js_lib_count;
+
 void resetColor(void);
 void init_history_file();
 void jssh_redisplay(void);

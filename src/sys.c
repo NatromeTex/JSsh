@@ -1,3 +1,4 @@
+#include <pwd.h>
 #include <ctype.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -8,12 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdbool.h>
 #include <termios.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "sys.h"
+#include "utils.h"
 #include "quickjs.h"
 
 #define REGISTER_APP(ctx, global, name, func) JS_SetPropertyStr(ctx, global, name, JS_NewCFunction(ctx, func, name, 0));
@@ -262,6 +265,11 @@ static JSValue js_sys_registerApp(JSContext *ctx, JSValueConst this_val, int arg
     return JS_UNDEFINED;
 }
 
+// sys.getLibCount()
+static JSValue js_sys_getLibCount(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    return JS_NewInt32(ctx, js_lib_count);
+}
+
 void js_init_apps(JSContext *ctx) {
     const char *apps_root = "/lib/apps";
     DIR *dir = opendir(apps_root);
@@ -301,6 +309,76 @@ void js_init_apps(JSContext *ctx) {
     closedir(dir);
 }
 
+// sys.username()
+static JSValue js_sys_username(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    uid_t uid = getuid();
+    struct passwd *pw = getpwuid(uid);
+    if (!pw)
+        return JS_NULL;
+    return JS_NewString(ctx, pw->pw_name);
+}
+
+// sys.getcpu()
+static JSValue js_getcpu(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, "unknown"));
+    JS_SetPropertyStr(ctx, obj, "cores", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, obj, "threads", JS_NewInt32(ctx, 0));
+    if (!f) return obj;
+
+    char buf[512];
+    char *model = NULL;
+    int threads = 0;
+    struct {
+        int phys_id;
+        int core_id;
+    } seen[1024]; // safe for most CPUs
+    int seen_count = 0;
+    int cur_phys_id = -1;
+    int cur_core_id = -1;
+    while (fgets(buf, sizeof(buf), f)) {
+        if (strncmp(buf, "model name", 10) == 0) {
+            if (!model) {
+                char *colon = strchr(buf, ':');
+                if (colon) {
+                    model = colon + 2;
+                    model[strcspn(model, "\n")] = 0;
+                    JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, model));
+                }
+            }
+        } else if (strncmp(buf, "processor", 9) == 0) {
+            threads++;
+        } else if (strncmp(buf, "physical id", 11) == 0) {
+            cur_phys_id = atoi(strchr(buf, ':') + 1);
+        } else if (strncmp(buf, "core id", 7) == 0) {
+            cur_core_id = atoi(strchr(buf, ':') + 1);
+            if (cur_phys_id >= 0 && cur_core_id >= 0) {
+                bool exists = false;
+                for (int i = 0; i < seen_count; i++) {
+                    if (seen[i].phys_id == cur_phys_id &&
+                        seen[i].core_id == cur_core_id) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists && seen_count < 1024) {
+                    seen[seen_count].phys_id = cur_phys_id;
+                    seen[seen_count].core_id = cur_core_id;
+                    seen_count++;
+                }
+                cur_phys_id = -1;
+                cur_core_id = -1;
+            }
+        }
+    }
+    fclose(f);
+
+    JS_SetPropertyStr(ctx, obj, "threads", JS_NewInt32(ctx, threads));
+    JS_SetPropertyStr(ctx, obj, "cores", JS_NewInt32(ctx, seen_count));
+    return obj;
+}
+
 // Register sys.* functions
 void js_init_sys(JSContext *ctx) {
     JSValue global_obj = JS_GetGlobalObject(ctx);
@@ -320,6 +398,9 @@ void js_init_sys(JSContext *ctx) {
     JS_SetPropertyStr(ctx, sys, "isatty", JS_NewCFunction(ctx, js_sys_isatty, "isatty", 1));
     JS_SetPropertyStr(ctx, sys, "ttyname", JS_NewCFunction(ctx, js_sys_ttyname, "ttyname", 1));
     JS_SetPropertyStr(ctx, sys, "registerApp", JS_NewCFunction(ctx, js_sys_registerApp, "registerApp", 2));
+    JS_SetPropertyStr(ctx, sys, "username", JS_NewCFunction(ctx, js_sys_username, "username", 0));
+    JS_SetPropertyStr(ctx, sys, "getpkgCount", JS_NewCFunction(ctx, js_sys_getLibCount, "getpkgCount", 0));
+    JS_SetPropertyStr(ctx, sys, "getcpu", JS_NewCFunction(ctx, js_getcpu, "getcpu", 0));
 
     JS_SetPropertyStr(ctx, global_obj, "sys", sys);
     JS_FreeValue(ctx, global_obj);

@@ -99,6 +99,10 @@ const helpdb = {
 {green}show_env(){reset}
   Show current environment configuration.
 `,
+    jsfetch: `
+{green}jsfetch(){reset}
+  Show current system information.
+`,
 
     update: `
 {green}update(){reset}

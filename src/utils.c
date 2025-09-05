@@ -17,6 +17,7 @@
 #include "utils.h"
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
+int js_lib_count = 0; // Pure JS libs counter
 
 // History path setup
 // Call this at startup
@@ -236,6 +237,7 @@ void load_js_libs(JSContext *ctx, const char *dirpath) {
                 snprintf(path, sizeof(path), "%s/%s", dirpath, name);
                 printf("[JSsh] Loading %s\n", path);
                 load_js_file(ctx, path);
+                js_lib_count++;
             }
         }
     }
@@ -289,7 +291,7 @@ JSValue js_printR(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 // QOL updates
 
 // ("") autocomplete
-static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac",NULL };
+static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac", "help",NULL };
 
 static int is_autoquote_cmd(const char *tok) {
     for (int i = 0; autoquote_cmds[i]; i++)
