@@ -58,7 +58,10 @@ int main(int argc, char **argv) {
     detect_color_mode();
 
     // Init keybindings for autocomplete
-    init_qol_bindings();  
+    init_qol_bindings();
+
+    // Init highlighting
+    rl_redisplay_function = jssh_redisplay;
 
     struct passwd *pw = getpwuid(getuid());
     const char *home = getenv("HOME");
@@ -97,6 +100,7 @@ int main(int argc, char **argv) {
         if (!line) { // EOF (Ctrl-D)
             break;
         }
+        printf("\n");
 
         if (*line){
             add_history(line);

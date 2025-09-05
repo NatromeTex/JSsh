@@ -352,4 +352,108 @@ void init_qol_bindings(void) {
 }
 =======
 }
->>>>>>> bea3155 (Moved env logic to env.ch/env.h)
+
+// Syntax Highliting
+#define CLR_RESET   "\033[0m"
+#define CLR_KEYWORD "\033[38;2;85;154;211m"  // blue
+#define CLR_STRING  "\033[38;2;206;145;120m"  // green
+#define CLR_NUMBER  "\033[38;2;148;206;168m"  // magenta
+#define CLR_FUNCTION "\033[38;2;220;220;170m" // yelow
+
+static const char *js_keywords[] = {
+    "function","return","if","else","while","for","var","let","const",
+    "true","false","null","undefined","new","class","import","export",NULL
+};
+
+static char *highlight_line(const char *line) {
+    size_t cap = strlen(line) * 10 + 64;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+
+    char *dst = out;
+    const char *p = line;
+
+    while (*p) {
+        int matched = 0;
+
+        // keywords (must be full word)
+        for (int i = 0; js_keywords[i]; i++) {
+            size_t len = strlen(js_keywords[i]);
+            if (strncmp(p, js_keywords[i], len) == 0) {
+                char next = p[len];
+                char prev = (p > line) ? p[-1] : '\0';
+                if ((next == '\0' || isspace((unsigned char)next) || next == '(') &&
+                    (prev == '\0' || (!isalnum((unsigned char)prev) && prev != '_'))) {
+                    dst += sprintf(dst, "%s%.*s%s", CLR_KEYWORD, (int)len, p, CLR_RESET);
+                    p += len;
+                    matched = 1;
+                    break;
+                }
+            }
+        }
+        if (matched) continue;
+
+        // strings
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            const char *start = p - 1;
+            while (*p && *p != quote) p++;
+            if (*p == quote) p++;
+            size_t len = p - start;
+            dst += sprintf(dst, "%s%.*s%s", CLR_STRING, (int)len, start, CLR_RESET);
+            continue;
+        }
+
+        // numbers
+        if (isdigit((unsigned char)*p)) {
+            const char *start = p;
+            while (isdigit((unsigned char)*p)) p++;
+            size_t len = p - start;
+            dst += sprintf(dst, "%s%.*s%s", CLR_NUMBER, (int)len, start, CLR_RESET);
+            continue;
+        }
+
+        // identifiers → check for function name (followed by '(')
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char *start = p;
+            while (isalnum((unsigned char)*p) || *p == '_') p++;
+            size_t len = p - start;
+            if (*p == '(') {
+                dst += sprintf(dst, "%s%.*s%s", CLR_FUNCTION, (int)len, start, CLR_RESET);
+            } else {
+                dst += sprintf(dst, "%.*s", (int)len, start);
+            }
+            continue;
+        }
+
+        // default single char
+        *dst++ = *p++;
+    }
+
+    *dst = '\0';
+    return out;
+}
+
+void jssh_redisplay(void) {
+    rl_on_new_line();
+    rl_clear_visible_line();
+
+    char *hl = highlight_line(rl_line_buffer);
+    const char *line = hl ? hl : rl_line_buffer;
+
+    fputs(rl_display_prompt, stdout);
+    fputs(line, stdout);
+
+    // Move cursor back if not at end
+    int cur = rl_point;
+    int end = strlen(rl_line_buffer);
+    if (end > cur) {
+        // Move left (end - cur) times
+        fprintf(stdout, "\033[%dD", end - cur);
+    }
+
+    fflush(stdout);
+    if (hl) free(hl);
+}
+
+

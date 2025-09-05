@@ -5,6 +5,7 @@
 
 void resetColor(void);
 void init_history_file();
+void jssh_redisplay(void);
 void detect_color_mode(void);
 void init_qol_bindings(void);
 void printR(const char *fmt, ...);
