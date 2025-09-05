@@ -12,10 +12,7 @@
 #include <sys/stat.h>
 #include <readline/history.h>
 #include <readline/readline.h>
-<<<<<<< HEAD
-=======
 #include "sys.h"
->>>>>>> bea3155 (Moved env logic to env.ch/env.h)
 #include "env.h"
 #include "utils.h"
 
