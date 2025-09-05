@@ -98,6 +98,7 @@ int main(int argc, char **argv) {
 
         char *line = readline(prompt);
         if (!line) { // EOF (Ctrl-D)
+            printf("\n");
             break;
         }
         printf("\n");

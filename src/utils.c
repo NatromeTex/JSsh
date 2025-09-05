@@ -355,10 +355,10 @@ void init_qol_bindings(void) {
 
 // Syntax Highliting
 #define CLR_RESET   "\033[0m"
-#define CLR_KEYWORD "\033[38;2;85;154;211m"  // blue
-#define CLR_STRING  "\033[38;2;206;145;120m"  // green
-#define CLR_NUMBER  "\033[38;2;148;206;168m"  // magenta
-#define CLR_FUNCTION "\033[38;2;220;220;170m" // yelow
+#define CLR_KEYWORD "\033[38;2;85;130;231m"  // blue
+#define CLR_STRING  "\033[38;2;206;145;120m"  // brown
+#define CLR_NUMBER  "\033[38;2;148;206;110m"  // faded yellow
+#define CLR_FUNCTION "\033[38;2;220;220;110m" // yelow
 
 static const char *js_keywords[] = {
     "function","return","if","else","while","for","var","let","const",

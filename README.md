@@ -32,8 +32,9 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
 - Extensible: drop JS files into a commands directory and extend your shell.
 - Make it your own by editing the configuration file at `~/.jssh_env`. 
 - Don't like adding `("")` after commands? Press `tab` after writing a command like ls for autocomplete!
+- Basic syntax highlighting for JS in the shell.
 - Written in C, powered by QuickJS.
-- Update the shell after changes with a single command
+- Update the shell after code modifications with a single command.
 - Zero shame in declaring JavaScript the one true language.
 
 
