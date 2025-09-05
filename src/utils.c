@@ -272,12 +272,6 @@ JSValue js_env_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     return JS_UNDEFINED;
 }
 
-<<<<<<< HEAD
-// QOL updates
-
-// ("") autocomplete
-static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", NULL };
-=======
 // printR
 JSValue js_printR(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1)
@@ -296,7 +290,6 @@ JSValue js_printR(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 
 // ("") autocomplete
 static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac",NULL };
->>>>>>> bea3155 (Moved env logic to env.ch/env.h)
 
 static int is_autoquote_cmd(const char *tok) {
     for (int i = 0; autoquote_cmds[i]; i++)
@@ -345,9 +338,6 @@ static int jssh_tab_handler(int count, int key) {
 
 void init_qol_bindings(void) {
     rl_bind_key('\t', jssh_tab_handler);
-<<<<<<< HEAD
-}
-=======
 }
 
 // Syntax Highliting
