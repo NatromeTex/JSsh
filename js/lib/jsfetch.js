@@ -19,7 +19,8 @@ function jsfetch() {
     "      / / ___/ ___// / / /",
     " __  / /\\__ \\\\__ \\/ /_/ /",
     "/ /_/ /___/ /__/ / __  / ",
-    "\\____//____/____/_/ /_/ "
+    "\\____//____/____/_/ /_/ ",
+    "No Home like 127.0.0.1"
   ];
 
   function getSysInfo() {
@@ -28,6 +29,7 @@ function jsfetch() {
     let tty = sys.ttyname(0) || "tty0";
     let cols = 80, rows = 24;
     let cpu = sys.getcpu();
+    let ram = sys.getram();
     let pkg = sys.getpkgCount();
     try {
       let ws = sys.getWinSize();
@@ -36,7 +38,7 @@ function jsfetch() {
         rows = ws[1];
       }
     } catch {}
-    return { username, cwd, tty, cols, rows , cpu, pkg};
+    return { username, cwd, tty, cols, rows, cpu, ram, pkg};
   }
 
   const info = getSysInfo();
@@ -44,6 +46,7 @@ function jsfetch() {
     `${CLR_LABEL}User:${CLR_RESET}\t${CLR_VALUE}${info.username}${CLR_RESET}`,
     `${CLR_LABEL}CPU:${CLR_RESET}\t${CLR_VALUE}${info.cpu.model} ${CLR_RESET}`,
     `${CLR_LABEL}Compute:${CLR_RESET}\t${CLR_VALUE}${info.cpu.cores} cores ${info.cpu.threads} threads${CLR_RESET}`,
+    `${CLR_LABEL}Memory:${CLR_RESET}\t${CLR_VALUE}${info.ram} MiB${CLR_RESET}`,
     `${CLR_LABEL}CWD: ${CLR_RESET}\t${CLR_VALUE}${info.cwd}${CLR_RESET}`,
     `${CLR_LABEL}TTY: ${CLR_RESET}\t${CLR_VALUE}${info.tty}${CLR_RESET}`,
     `${CLR_LABEL}Size:${CLR_RESET}\t${CLR_VALUE}${info.cols}x${info.rows}${CLR_RESET}`,

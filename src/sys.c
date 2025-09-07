@@ -379,6 +379,23 @@ static JSValue js_getcpu(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return obj;
 }
 
+// sys.getram
+static JSValue js_getram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  FILE *f = fopen("/proc/meminfo", "r");
+  if (!f) return JS_NewFloat64(ctx, -1);
+  char key[64];
+  long value;
+  char unit[32];
+  while (fscanf(f, "%63s %ld %31s\n", key, &value, unit) == 3) {
+    if (strcmp(key, "MemTotal:") == 0) {
+      fclose(f);
+      return JS_NewInt32(ctx, (value / 1024.0));
+    }
+  }
+  fclose(f);
+  return JS_NewFloat64(ctx, -1);
+}
+
 // Register sys.* functions
 void js_init_sys(JSContext *ctx) {
     JSValue global_obj = JS_GetGlobalObject(ctx);
@@ -401,6 +418,7 @@ void js_init_sys(JSContext *ctx) {
     JS_SetPropertyStr(ctx, sys, "username", JS_NewCFunction(ctx, js_sys_username, "username", 0));
     JS_SetPropertyStr(ctx, sys, "getpkgCount", JS_NewCFunction(ctx, js_sys_getLibCount, "getpkgCount", 0));
     JS_SetPropertyStr(ctx, sys, "getcpu", JS_NewCFunction(ctx, js_getcpu, "getcpu", 0));
+    JS_SetPropertyStr(ctx, sys, "getram", JS_NewCFunction(ctx, js_getram, "getram", 0));
 
     JS_SetPropertyStr(ctx, global_obj, "sys", sys);
     JS_FreeValue(ctx, global_obj);
