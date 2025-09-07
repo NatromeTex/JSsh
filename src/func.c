@@ -426,30 +426,36 @@ JSValue js_chmod(JSContext *ctx, JSValueConst this_val,
 }
 
 // js
-JSValue js_runfile(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv) {
-    if (argc < 1) {
-        return JS_ThrowTypeError(ctx, "js(path) requires a filename");
-    }
+JSValue js_runfile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  if (argc < 1) {
+    return JS_ThrowTypeError(ctx, "js(path) requires a filename");
+  }
 
-    const char *filename = JS_ToCString(ctx, argv[0]);
-    if (!filename) {
-        return JS_EXCEPTION;
-    }
+  const char *filename = JS_ToCString(ctx, argv[0]);
+  if (!filename) {
+    return JS_EXCEPTION;
+  }
 
-    size_t buf_len;
-    uint8_t *buf = js_load_file(ctx, &buf_len, filename);
-    if (!buf) {
-        JS_FreeCString(ctx, filename);
-        return JS_ThrowReferenceError(ctx, "cannot open '%s'", filename);
-    }
-
-    JSValue result = JS_Eval(ctx, (const char *)buf, buf_len, filename,
-                             JS_EVAL_TYPE_GLOBAL);
-
-    js_free(ctx, buf);
+  size_t buf_len;
+  uint8_t *buf = js_load_file(ctx, &buf_len, filename);
+  if (!buf) {
     JS_FreeCString(ctx, filename);
-    return result;
+    return JS_ThrowReferenceError(ctx, "cannot open '%s'", filename);
+  }
+
+  // Compile only, don’t execute yet
+  JSValue func = JS_Eval(ctx, (const char *)buf, buf_len, filename, JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+
+  js_free(ctx, buf);
+  JS_FreeCString(ctx, filename);
+
+  if (JS_IsException(func))
+    return func;
+
+  // Execute the compiled function immediately
+  JSValue result = JS_EvalFunction(ctx, func);
+
+  return result;
 }
 
 // clear
