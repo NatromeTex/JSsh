@@ -13,10 +13,8 @@ SRC = src/main.c \
       src/quickjs/libunicode.c \
       src/quickjs/dtoa.c
 OBJ = $(SRC:.c=.o)
-JSFILES := $(wildcard js/lib/*.js)
-APP_SRC := $(wildcard lib/apps/*/entry.c)
-APP_SO  := $(APP_SRC:.c=.so)
-all: bin/jssh $(APP_SO)
+JSFILES := $(wildcard /lib/js/*.js)
+all: bin/jssh 
 bin/jssh: $(OBJ) $(JSFILES)
 	@mkdir -p bin
 	$(CC) -o $@ $(OBJ) $(LDFLAGS)

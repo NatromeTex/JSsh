@@ -444,7 +444,7 @@ JSValue js_runfile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
   }
 
   // Compile only, don’t execute yet
-  JSValue func = JS_Eval(ctx, (const char *)buf, buf_len, filename, JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+  JSValue func = JS_Eval(ctx, (const char *)buf, buf_len, filename, JS_EVAL_FLAG_COMPILE_ONLY | JS_EVAL_TYPE_MODULE);
 
   js_free(ctx, buf);
   JS_FreeCString(ctx, filename);

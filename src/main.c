@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     JS_FreeValue(ctx, global_obj);
 
     // Load the pure JS commands
-    load_js_libs(ctx, "./js/lib");
+    load_js_libs(ctx, "./lib/js");
 
     // Get color mode of terminal
     detect_color_mode();

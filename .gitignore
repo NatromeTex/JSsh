@@ -56,6 +56,3 @@ dkms.conf
 
 # Compile target folder
 /bin
-
-# QuickJS dependency
-src/quickjs/

@@ -223,7 +223,7 @@ void load_js_file(JSContext *ctx, const char *path) {
 void load_js_libs(JSContext *ctx, const char *dirpath) {
     DIR *dir = opendir(dirpath);
     if (!dir) {
-        perror("opendir js/lib");
+        perror("opendir lib/js");
         return;
     }
 
