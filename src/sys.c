@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -27,8 +28,7 @@ static int rawmode_enabled = 0;
 typedef void (*app_register_func)(JSContext *ctx);
 
 // sys.open(path, flags, mode)
-static JSValue js_sys_open(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv) {
+static JSValue js_sys_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 2)
         return JS_ThrowTypeError(ctx, "open(path, flags[, mode])");
 
@@ -54,8 +54,7 @@ static JSValue js_sys_open(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.read(fd, len) -> string
-static JSValue js_sys_read(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv) {
+static JSValue js_sys_read(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 2)
         return JS_ThrowTypeError(ctx, "read(fd, len)");
 
@@ -79,8 +78,7 @@ static JSValue js_sys_read(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.write(fd, data)
-static JSValue js_sys_write(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv) {
+static JSValue js_sys_write(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 2)
         return JS_ThrowTypeError(ctx, "write(fd, data)");
 
@@ -102,8 +100,7 @@ static JSValue js_sys_write(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.close(fd)
-static JSValue js_sys_close(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv) {
+static JSValue js_sys_close(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "close(fd)");
 
@@ -118,8 +115,7 @@ static JSValue js_sys_close(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.getcwd()
-static JSValue js_sys_getcwd(JSContext *ctx, JSValueConst this_val,
-                             int argc, JSValueConst *argv) {
+static JSValue js_sys_getcwd(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     char buf[PATH_MAX];
     if (!getcwd(buf, sizeof(buf)))
         return JS_ThrowInternalError(ctx, "getcwd failed: %s", strerror(errno));
@@ -127,8 +123,7 @@ static JSValue js_sys_getcwd(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.chdir(path)
-static JSValue js_sys_chdir(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv) {
+static JSValue js_sys_chdir(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "chdir(path)");
 
@@ -144,8 +139,7 @@ static JSValue js_sys_chdir(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.readdir(path) -> array of strings
-static JSValue js_sys_readdir(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv) {
+static JSValue js_sys_readdir(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "readdir(path)");
 
@@ -170,8 +164,7 @@ static JSValue js_sys_readdir(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.raw_mode(1)
-JSValue js_sys_enableRawMode(JSContext *ctx, JSValueConst this_val,
-                             int argc, JSValueConst *argv) {
+JSValue js_sys_enableRawMode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (rawmode_enabled) return JS_UNDEFINED;
 
     if (!isatty(STDIN_FILENO))
@@ -195,8 +188,7 @@ JSValue js_sys_enableRawMode(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.raw_mode(0)
-JSValue js_sys_disableRawMode(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv) {
+JSValue js_sys_disableRawMode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (!rawmode_enabled) return JS_UNDEFINED;
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1)
         return JS_ThrowTypeError(ctx, "tcsetattr restore failed");
@@ -205,8 +197,7 @@ JSValue js_sys_disableRawMode(JSContext *ctx, JSValueConst this_val,
 }
 
 // sys.readkey()
-JSValue js_sys_readKey(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv) {
+JSValue js_sys_readKey(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     char c;
     ssize_t n = read(STDIN_FILENO, &c, 1);
     if (n <= 0) {
@@ -217,8 +208,7 @@ JSValue js_sys_readKey(JSContext *ctx, JSValueConst this_val,
 }
 
 // Get terminal window size
-JSValue js_sys_getWinSize(JSContext *ctx, JSValueConst this_val,
-                          int argc, JSValueConst *argv) {
+JSValue js_sys_getWinSize(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1) {
         return JS_ThrowTypeError(ctx, "ioctl TIOCGWINSZ failed");

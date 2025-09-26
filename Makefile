@@ -1,6 +1,8 @@
 CC = cc
 CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE
 LDFLAGS = -lm -ldl -lreadline -lncurses
+
+# core sources
 SRC = src/main.c \
       src/utils.c \
       src/func.c \
@@ -12,13 +14,27 @@ SRC = src/main.c \
       src/quickjs/libregexp.c \
       src/quickjs/libunicode.c \
       src/quickjs/dtoa.c
+
+# optional modules
+MODULES ?=
+ifeq ($(MODULES),network)
+SRC += lib/network/module.c \
+       lib/network/net_utils.c 
+CFLAGS += -DENABLE_NETWORK
+NEED_SETCAP = yes
+endif
+
 OBJ = $(SRC:.c=.o)
-JSFILES := $(wildcard /lib/js/*.js)
-all: bin/jssh 
-bin/jssh: $(OBJ) $(JSFILES)
+
+all: bin/jssh
+
+bin/jssh: $(OBJ)
 	@mkdir -p bin
 	$(CC) -o $@ $(OBJ) $(LDFLAGS)
-lib/apps/%/entry.so: lib/apps/%/entry.c
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $< $(LDFLAGS)
+ifeq ($(NEED_SETCAP),yes)
+	@echo "Setting cap_net_raw on $@"
+	@sudo setcap cap_net_raw=ep $@
+endif
+
 clean:
-	rm -f $(OBJ) $(APP_SO)
+	rm -f $(OBJ) bin/jssh

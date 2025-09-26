@@ -1,0 +1,14 @@
+// lib/network/module.c
+#include "quickjs.h"
+#include "net_utils.h"
+
+void js_init_network(JSContext *ctx) {
+    JSValue global_obj = JS_GetGlobalObject(ctx);
+    JSValue net = JS_NewObject(ctx);
+
+    JS_SetPropertyStr(ctx, net, "ping", JS_NewCFunction(ctx, js_net_ping, "ping", 0));
+    JS_SetPropertyStr(ctx, net, "netstat", JS_NewCFunction(ctx, js_net_netstat, "netstat", 0));
+    JS_SetPropertyStr(ctx, global_obj, "net", net);
+
+    JS_FreeValue(ctx, global_obj);
+}

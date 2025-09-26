@@ -139,19 +139,39 @@ JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     // Save current history
     write_history(history_file);
 
-    // Run make in current directory
-    int ret = system("make");
+    char cmd[2048];
+
+    if (argc == 0) {
+        // No modules, just build core
+        snprintf(cmd, sizeof(cmd), "make clean && make");
+    } else {
+        // Build MODULES string
+        char modules[1024];
+        modules[0] = '\0';
+
+        for (int i = 0; i < argc; i++) {
+            const char *mod = JS_ToCString(ctx, argv[i]);
+            if (!mod) continue;
+            if (i > 0) strcat(modules, " ");
+            strcat(modules, mod);
+            JS_FreeCString(ctx, mod);
+        }
+        printf("MODULES=\"%s\" make", modules);
+        snprintf(cmd, sizeof(cmd), "make clean && make MODULES=\"%s\"", modules);
+    }
+
+    // Run make
+    int ret = system(cmd);
     if (ret != 0) {
         fprintf(stderr, "update: make failed\n");
         return JS_UNDEFINED;
     }
 
     // Replace current process with the newly built binary
-    char *argv0 = "./bin/jssh";   // path to new binary
+    char *argv0 = "./bin/jssh";
     char *args[] = { argv0, NULL };
-    execv(argv0, args);           // replaces current REPL process
+    execv(argv0, args);
 
-    // If execv fails
     perror("execv");
     return JS_UNDEFINED;
 }
@@ -291,7 +311,7 @@ JSValue js_printR(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
 // QOL updates
 
 // ("") autocomplete
-static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac", "help",NULL };
+static const char *autoquote_cmds[] = { "ls", "cat", "chmod", "mkdir", "cd", "touch", "echo", "rm", "js", "tac", "help", NULL};
 
 static int is_autoquote_cmd(const char *tok) {
     for (int i = 0; autoquote_cmds[i]; i++)
@@ -424,8 +444,7 @@ static char *highlight_line(const char *line) {
 }
 
 void jssh_redisplay(void) {
-    rl_on_new_line();
-    rl_clear_visible_line();
+    fputs("\033[2K\r", stdout);
 
     char *hl = highlight_line(rl_line_buffer);
     const char *line = hl ? hl : rl_line_buffer;
@@ -433,12 +452,25 @@ void jssh_redisplay(void) {
     fputs(rl_display_prompt, stdout);
     fputs(line, stdout);
 
+    // prediction
+    const char *pred = NULL;
+    if (is_autoquote_cmd(line)) {
+        pred = "(\"\")";
+    }
+
+    int pred_len = 0;
+    if (pred) {
+        fputs("\033[90m", stdout);
+        fputs(pred, stdout);
+        fputs("\033[0m", stdout);
+        pred_len = strlen(pred);
+    }
+
     // Move cursor back if not at end
     int cur = rl_point;
-    int end = strlen(rl_line_buffer);
-    if (end > cur) {
-        // Move left (end - cur) times
-        fprintf(stdout, "\033[%dD", end - cur);
+    int end = rl_end;
+    if (end > cur || pred_len > 0) {
+        fprintf(stdout, "\033[%dD", (end - cur) + pred_len);
     }
 
     fflush(stdout);

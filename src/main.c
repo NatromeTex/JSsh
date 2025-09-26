@@ -18,6 +18,13 @@
 #include "sys.h"
 #include "env.h"
 
+#ifdef ENABLE_NETWORK
+extern void js_init_network(JSContext *ctx);
+#endif
+#ifndef ENABLE_NETWORK
+static void js_init_network(JSContext *ctx) {}
+#endif
+
 extern const char *history_file;
 
 int main(int argc, char **argv) {
@@ -56,6 +63,10 @@ int main(int argc, char **argv) {
 
     // Get color mode of terminal
     detect_color_mode();
+
+    // Module library conditional imports
+    js_init_network(ctx);
+
 
     // Init keybindings for autocomplete
     init_qol_bindings();
