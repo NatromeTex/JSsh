@@ -189,11 +189,12 @@ show_env()
 ## `update()`
 
 * **Description**: Rebuilds the JSSH binary using `make` in the current folder and replaces the running REPL process with the newly built binary. History is preserved across the update.
-* **Parameters**: None.
+* **Parameters**:
+  * `Modules` (string): Includes the specified modules from `/lib/*` based on name. Type `help(update)` to see available modules. 
 * **Example**:
 
 ```js
-update()
+update([Modules])
 ```
 
 * **Behavior**:
@@ -203,8 +204,56 @@ update()
   3. Replaces the current process with the newly built binary.
   4. Reloads history in the new REPL automatically.
 
+
+<br>
+
+# Net Utils commands
+
+This section details the commands present in the Net Utils package available installing the **network** package. All code in this package is written in **native C** and does not depend on `system()` to run the code in the JSsh REPL.
+
+---
+
+## `net.ping()`
+
+* **Description**: Pings the given IP address and returns responses.
+* **Parameters**: 
+  * `IP` (string): IP address of the server to be pinged.
+* **Example**:
+
+```js
+net.ping("1.1.1.1")
+```
+
+---
+
+## `net.netstat()`
+
+* **Description**: Displays the current established, inbound/outbound and disconnected network connections.
+* **Parameters**: None
+* **Example**:
+
+```js
+net.netstat()
+```
+
+---
+
+## `net.ifconfig()`
+
+* **Description**: Displays the current interfaces and their IP addresses along with additional info.
+* **Parameters**: None
+* **Example**:
+
+```js
+net.ifconfig()
+//lo:  Link encap:Ethernet  HWaddr 00:00:00:00:00:00
+//      inet addr:127.0.0.1  Bcast:0.0.0.0  Mask:255.0.0.0
+//      Flags:0x49  MTU:65536
+```
+
 ---
 
 ### Notes
 * No shell invocation occurs for these commands (`system()` is only used internally in `update()` for convenience).
 * These primitives form the foundation for building more complex shell-like scripts in JSSH.
+* Installation of net-utils needs sudo on your system.

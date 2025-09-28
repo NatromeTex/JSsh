@@ -46,8 +46,17 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
    git clone https://github.com/NatromeTex/jssh.git
    cd jssh
    ```
+   or
+   ```bash
+   git clone https://github.com/NatromeTex/jssh.git --recursive 
+   cd jssh
+   ```
+   to get the quickjs submodule directly.
+
+   For manual installation:
     Get the QuickJS source files (version 2020-11-08 recommended).
-    Extract them into /src so you have the quickjs files in /src
+    Extract them into `/src` so you have the quickjs files in `/src`.
+
 
 2. Add readline dependencies
     ```bash
@@ -59,7 +68,13 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
    ```bash
     make
    ```
-   This will compile everything and produce the binary at bin/jssh.
+   This will compile JSsh with the core utils and produce the binary at bin/jssh.
+   To add modules like `network` or `fs`, run
+   ```bash
+    sudo make MODULES=network
+    sudo make MODULES="network", "fs"
+   ```
+   Note that to install the network dependencies, make will require root privleges to allocate the appropriate permissions. The core dependencies do not require root privleges.
 
 4. Usage
 

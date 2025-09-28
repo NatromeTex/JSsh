@@ -8,6 +8,7 @@ void js_init_network(JSContext *ctx) {
 
     JS_SetPropertyStr(ctx, net, "ping", JS_NewCFunction(ctx, js_net_ping, "ping", 0));
     JS_SetPropertyStr(ctx, net, "netstat", JS_NewCFunction(ctx, js_net_netstat, "netstat", 0));
+    JS_SetPropertyStr(ctx, net, "ifconfig", JS_NewCFunction(ctx, js_ifconfig, "ifconfig", 0));
     JS_SetPropertyStr(ctx, global_obj, "net", net);
 
     JS_FreeValue(ctx, global_obj);

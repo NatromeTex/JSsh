@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/utsname.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "sys.h"
@@ -260,6 +261,13 @@ static JSValue js_sys_getLibCount(JSContext *ctx, JSValueConst this_val, int arg
     return JS_NewInt32(ctx, js_lib_count);
 }
 
+// sys.arch()
+static JSValue js_arch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    struct utsname u;
+    uname(&u);
+    return JS_NewString(ctx, u.machine);
+}
+
 void js_init_apps(JSContext *ctx) {
     const char *apps_root = "/lib/apps";
     DIR *dir = opendir(apps_root);
@@ -409,6 +417,7 @@ void js_init_sys(JSContext *ctx) {
     JS_SetPropertyStr(ctx, sys, "getpkgCount", JS_NewCFunction(ctx, js_sys_getLibCount, "getpkgCount", 0));
     JS_SetPropertyStr(ctx, sys, "getcpu", JS_NewCFunction(ctx, js_getcpu, "getcpu", 0));
     JS_SetPropertyStr(ctx, sys, "getram", JS_NewCFunction(ctx, js_getram, "getram", 0));
+    JS_SetPropertyStr(ctx, sys, "arch", JS_NewCFunction(ctx, js_arch, "arch", 0));
 
     JS_SetPropertyStr(ctx, global_obj, "sys", sys);
     JS_FreeValue(ctx, global_obj);

@@ -1,15 +1,18 @@
-#include "quickjs.h"
+#include <math.h>
 #include <errno.h>
+#include <netdb.h>
 #include <stdio.h>
+#include <net/if.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/ip_icmp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <math.h>
 #include <sys/time.h>
+#include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip_icmp.h>
+#include "quickjs.h"
 
 #define PACKET_SIZE 64
 #define PING_COUNT 4
@@ -229,4 +232,135 @@ JSValue js_net_netstat(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
 
     return JS_NewString(ctx, result);
+}
+
+//net.ifconfig()
+JSValue js_ifconfig(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    int fd;
+    struct ifconf ifc;
+    struct ifreq *ifr;
+    char buf[8192];
+    char *out;
+    size_t out_size = 32768;  // generous buffer
+    int i, n;
+    int minimal = 0;
+
+    if (argc > 0 && JS_IsString(argv[0])) {
+        const char *mode = JS_ToCString(ctx, argv[0]);
+        if (mode && strcmp(mode, "min") == 0)
+            minimal = 1;
+        JS_FreeCString(ctx, mode);
+    }
+
+    out = malloc(out_size);
+    if (!out) return JS_ThrowOutOfMemory(ctx);
+    out[0] = '\0';
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        free(out);
+        return JS_ThrowTypeError(ctx, "socket() failed");
+    }
+
+    ifc.ifc_len = sizeof(buf);
+    ifc.ifc_buf = buf;
+    if (ioctl(fd, SIOCGIFCONF, &ifc) < 0) {
+        close(fd);
+        free(out);
+        return JS_ThrowTypeError(ctx, "ioctl(SIOCGIFCONF) failed");
+    }
+
+    ifr = ifc.ifc_req;
+    n = ifc.ifc_len / sizeof(struct ifreq);
+
+    // Track seen interfaces to avoid duplicates
+    char seen_interfaces[128][IFNAMSIZ];
+    int seen_count = 0;
+
+    for (i = 0; i < n; i++) {
+        // Check if we've already processed this interface
+        int is_duplicate = 0;
+        for (int j = 0; j < seen_count; j++) {
+            if (strcmp(ifr[i].ifr_name, seen_interfaces[j]) == 0) {
+                is_duplicate = 1;
+                break;
+            }
+        }
+        
+        if (is_duplicate) {
+            continue; // Skip duplicate interface
+        }
+        
+        // Add to seen interfaces
+        strncpy(seen_interfaces[seen_count], ifr[i].ifr_name, IFNAMSIZ);
+        seen_count++;
+
+        char line[1024];
+        struct ifreq ifdata;
+        struct sockaddr_in *sa;
+        char ip[64] = "N/A";
+        char netmask[64] = "N/A";
+        char brd[64] = "N/A";
+        char mac[32] = "N/A";
+        int mtu = 0;
+        short flags = 0;
+
+        strncpy(ifdata.ifr_name, ifr[i].ifr_name, IFNAMSIZ);
+
+        // IP address
+        if (ioctl(fd, SIOCGIFADDR, &ifdata) == 0) {
+            sa = (struct sockaddr_in*)&ifdata.ifr_addr;
+            snprintf(ip, sizeof(ip), "%s", inet_ntoa(sa->sin_addr));
+        }
+
+        // Netmask
+        if (ioctl(fd, SIOCGIFNETMASK, &ifdata) == 0) {
+            sa = (struct sockaddr_in*)&ifdata.ifr_netmask;
+            snprintf(netmask, sizeof(netmask), "%s", inet_ntoa(sa->sin_addr));
+        }
+
+        // Broadcast
+        if (ioctl(fd, SIOCGIFBRDADDR, &ifdata) == 0) {
+            sa = (struct sockaddr_in*)&ifdata.ifr_broadaddr;
+            snprintf(brd, sizeof(brd), "%s", inet_ntoa(sa->sin_addr));
+        }
+
+        // MAC address
+        if (ioctl(fd, SIOCGIFHWADDR, &ifdata) == 0) {
+            unsigned char *hw = (unsigned char*)ifdata.ifr_hwaddr.sa_data;
+            snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+        }
+
+        // Flags
+        if (ioctl(fd, SIOCGIFFLAGS, &ifdata) == 0) {
+            flags = ifdata.ifr_flags;
+        }
+
+        // MTU
+        if (ioctl(fd, SIOCGIFMTU, &ifdata) == 0) {
+            mtu = ifdata.ifr_mtu;
+        }
+
+        if (minimal) {
+            snprintf(line, sizeof(line),
+                     "%s: %s\n",
+                     ifr[i].ifr_name, ip);
+        } else {
+            snprintf(line, sizeof(line),
+                     "%s:  Link encap:Ethernet  HWaddr %s\n"
+                     "      inet addr:%s  Bcast:%s  Mask:%s\n"
+                     "      Flags:0x%x  MTU:%d\n\n",
+                     ifr[i].ifr_name, mac,
+                     ip, brd, netmask,
+                     flags, mtu);
+        }
+
+        strncat(out, line, out_size - strlen(out) - 1);
+    }
+
+    close(fd);
+
+    JSValue ret = JS_NewString(ctx, out);
+    free(out);
+    return ret;
 }

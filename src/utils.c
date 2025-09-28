@@ -443,6 +443,41 @@ static char *highlight_line(const char *line) {
     return out;
 }
 
+typedef struct {
+    const char *text;  // suggestion string
+    int active;        // 1 if should show, 0 otherwise
+} prediction_t;
+
+static prediction_t jssh_predict(const char *buf, int point) {
+    prediction_t out = { .text = NULL, .active = 0 };
+
+    // --- simple tokenizer: get first word ---
+    int i = 0;
+    while (buf[i] && isspace((unsigned char)buf[i])) i++;
+    int start = i;
+    while (buf[i] && !isspace((unsigned char)buf[i]) && buf[i] != '(') i++;
+    int end = i;
+
+    int tok_len = end - start;
+    if (tok_len <= 0 || tok_len >= 64) return out;
+
+    char tok[64];
+    memcpy(tok, buf + start, tok_len);
+    tok[tok_len] = 0;
+
+    // --- only trigger if cursor is at end of token ---
+    int j = end;
+    while (buf[j] && isspace((unsigned char)buf[j])) j++;
+    if (point != end || buf[j] == '(') return out;
+
+    if (is_autoquote_cmd(tok)) {
+        out.text = "(\"\")";
+        out.active = 1;
+    }
+
+    return out;
+}
+
 void jssh_redisplay(void) {
     fputs("\033[2K\r", stdout);
 
@@ -452,29 +487,22 @@ void jssh_redisplay(void) {
     fputs(rl_display_prompt, stdout);
     fputs(line, stdout);
 
-    // prediction
-    const char *pred = NULL;
-    if (is_autoquote_cmd(line)) {
-        pred = "(\"\")";
-    }
+    prediction_t pred = jssh_predict(rl_line_buffer, rl_point);
 
-    int pred_len = 0;
-    if (pred) {
+    if (pred.active && pred.text) {
         fputs("\033[90m", stdout);
-        fputs(pred, stdout);
+        fputs(pred.text, stdout);
         fputs("\033[0m", stdout);
-        pred_len = strlen(pred);
     }
 
-    // Move cursor back if not at end
     int cur = rl_point;
     int end = rl_end;
-    if (end > cur || pred_len > 0) {
-        fprintf(stdout, "\033[%dD", (end - cur) + pred_len);
+    if (end > cur || (pred.active && pred.text)) {
+        int back = (end - cur) + (pred.active ? (int)strlen(pred.text) : 0);
+        fprintf(stdout, "\033[%dD", back);
     }
 
     fflush(stdout);
     if (hl) free(hl);
 }
-
 
