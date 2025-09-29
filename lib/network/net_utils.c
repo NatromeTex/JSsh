@@ -16,7 +16,9 @@
 
 #define PACKET_SIZE 64
 #define PING_COUNT 4
-#define TIMEOUT_SEC 1
+#define MAX_HOPS 30
+#define PROBE_PORT 33434
+#define TIMEOUT_SEC 2
 
 // checksum
 static unsigned short icmp_checksum(void *b, int len) {
@@ -360,6 +362,112 @@ JSValue js_ifconfig(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
 
     close(fd);
 
+    JSValue ret = JS_NewString(ctx, out);
+    free(out);
+    return ret;
+}
+
+//net.tracert()
+JSValue js_tracert(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1 || !JS_IsString(argv[0])) {
+        return JS_ThrowTypeError(ctx, "Expected hostname");
+    }
+    const char *host = JS_ToCString(ctx, argv[0]);
+    if (!host) return JS_EXCEPTION;
+    
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        JS_FreeCString(ctx, host);
+        return JS_ThrowTypeError(ctx, "getaddrinfo failed");
+    }
+    
+    int sendfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int recvfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sendfd < 0 || recvfd < 0) {
+        freeaddrinfo(res);
+        JS_FreeCString(ctx, host);
+        return JS_ThrowTypeError(ctx, "socket() failed");
+    }
+    
+    struct timeval tv = {TIMEOUT_SEC, 0};
+    setsockopt(recvfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    char *out = malloc(16384);
+    out[0] = '\0';
+    
+    struct sockaddr_in *dest = (struct sockaddr_in*)res->ai_addr;
+    char dest_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &dest->sin_addr, dest_ip, sizeof(dest_ip));
+    
+    // Header
+    char header[256];
+    snprintf(header, sizeof(header), "Tracing route to %s [%s]\nover a maximum of %d hops:\n\n", 
+             host, dest_ip, MAX_HOPS);
+    strncat(out, header, 16384 - strlen(out) - 1);
+    
+    dest->sin_port = htons(PROBE_PORT);
+    char sendbuf[32] = {0};
+    
+    for (int ttl = 1; ttl <= MAX_HOPS; ttl++) {
+        setsockopt(sendfd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
+        
+        struct timeval start, end;
+        gettimeofday(&start, NULL);
+        
+        sendto(sendfd, sendbuf, sizeof(sendbuf), 0,
+               (struct sockaddr*)dest, sizeof(*dest));
+        
+        struct sockaddr_in reply_addr;
+        socklen_t addrlen = sizeof(reply_addr);
+        char recvbuf[512];
+        int n = recvfrom(recvfd, recvbuf, sizeof(recvbuf), 0, 
+                        (struct sockaddr*)&reply_addr, &addrlen);
+        
+        gettimeofday(&end, NULL);
+        long ms = (end.tv_sec - start.tv_sec) * 1000 + 
+                  (end.tv_usec - start.tv_usec) / 1000;
+        
+        char line[256];
+        if (n < 0) {
+            snprintf(line, sizeof(line), " %2d     *        *        *     Request timed out.\n", ttl);
+        } else {
+            char ipstr[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &reply_addr.sin_addr, ipstr, sizeof(ipstr));
+            
+            // Reverse DNS lookup
+            char hostname[256] = {0};
+            struct sockaddr_in sa;
+            sa.sin_family = AF_INET;
+            sa.sin_addr = reply_addr.sin_addr;
+            if (getnameinfo((struct sockaddr*)&sa, sizeof(sa), hostname, sizeof(hostname),
+                          NULL, 0, 0) == 0) {
+                snprintf(line, sizeof(line), " %2d   %3ld ms   %3ld ms   %3ld ms  %s [%s]\n", 
+                        ttl, ms, ms, ms, hostname, ipstr);
+            } else {
+                snprintf(line, sizeof(line), " %2d   %3ld ms   %3ld ms   %3ld ms  %s\n", 
+                        ttl, ms, ms, ms, ipstr);
+            }
+            
+            // Check if we reached destination
+            if (reply_addr.sin_addr.s_addr == dest->sin_addr.s_addr) {
+                strncat(out, line, 16384 - strlen(out) - 1);
+                break;
+            }
+        }
+        strncat(out, line, 16384 - strlen(out) - 1);
+    }
+    
+    strncat(out, "\nTrace complete.\n", 16384 - strlen(out) - 1);
+    
+    close(sendfd);
+    close(recvfd);
+    freeaddrinfo(res);
+    JS_FreeCString(ctx, host);
+    
     JSValue ret = JS_NewString(ctx, out);
     free(out);
     return ret;

@@ -213,7 +213,7 @@ This section details the commands present in the Net Utils package available ins
 
 ---
 
-## `net.ping()`
+## `net.ping(IP)`
 
 * **Description**: Pings the given IP address and returns responses.
 * **Parameters**: 
@@ -249,6 +249,35 @@ net.ifconfig()
 //lo:  Link encap:Ethernet  HWaddr 00:00:00:00:00:00
 //      inet addr:127.0.0.1  Bcast:0.0.0.0  Mask:255.0.0.0
 //      Flags:0x49  MTU:65536
+```
+
+---
+
+## `net.tracert(IP)`
+
+* **Description**: Displays the hops between your system and the specified IP/Domain. Performs dns and reverse dns lookups where necessary.
+* **Parameters**:
+  * `IP` (string): IP address or Domain name of server to which the route has to be traced.
+* **Example**:
+
+```js
+net.tracert("google.com")
+//Tracing route to google.com [142.250.77.110]
+//over a maximum of 30 hops:
+
+//  1     0 ms     0 ms     0 ms  172.31.16.1
+//  2     3 ms     3 ms     3 ms  X.X.X.X [X.X.X.X]
+//  3    17 ms    17 ms    17 ms  Y.Y.Y.Y [Y.Y.Y.Y]
+//  4    41 ms    41 ms    41 ms  Z.Z.Z.Z [Z.Z.Z.Z]
+//  5    28 ms    28 ms    28 ms  A.A.A.A [A.A.A.A]
+//  6    41 ms    41 ms    41 ms  B.B.B.B [B.B.B.B]
+//  7     *        *        *     Request timed out.
+//  8     *        *        *     Request timed out.
+//  9    45 ms    45 ms    45 ms  142.251.55.238 [142.251.55.238]
+// 10    44 ms    44 ms    44 ms  216.239.56.65 [216.239.56.65]
+// 11    29 ms    29 ms    29 ms  pnmaaa-aq-in-f14.1e100.net [142.250.77.110]
+
+//Trace complete.
 ```
 
 ---
