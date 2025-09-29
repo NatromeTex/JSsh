@@ -60,38 +60,61 @@ static const char *tcp_state_name(unsigned int st) {
 
 // net.ping()
 JSValue js_net_ping(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    if (argc < 1) return JS_NewString(ctx, "host required");
-    const char *host = JS_ToCString(ctx, argv[0]);
-    if (!host) return JS_UNDEFINED;
-
-    struct hostent *he = gethostbyname(host);
-    if (!he) {
-        JS_FreeCString(ctx, host);
-        return JS_NewString(ctx, "host not found");
+    if (argc < 1 || !JS_IsString(argv[0])) {
+        return JS_ThrowTypeError(ctx, "Expected hostname");
     }
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr = *(struct in_addr*)he->h_addr;
-
+    
+    const char *host = JS_ToCString(ctx, argv[0]);
+    if (!host) return JS_EXCEPTION;
+    
+    // Use getaddrinfo instead of deprecated gethostbyname
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_RAW;
+    hints.ai_protocol = IPPROTO_ICMP;
+    
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        JS_FreeCString(ctx, host);
+        return JS_ThrowTypeError(ctx, "Cannot resolve hostname");
+    }
+    
+    struct sockaddr_in *addr = (struct sockaddr_in*)res->ai_addr;
+    char dest_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr->sin_addr, dest_ip, sizeof(dest_ip));
+    
+    // Reverse DNS lookup
+    char resolved_host[256] = {0};
+    getnameinfo((struct sockaddr*)addr, sizeof(*addr), resolved_host, sizeof(resolved_host),
+                NULL, 0, 0);
+    
     int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sock < 0) {
-        int e = errno;
-        char err[128];
-        snprintf(err, sizeof(err), "socket() failed: %s (%d)", strerror(e), e);
+        freeaddrinfo(res);
         JS_FreeCString(ctx, host);
-        return JS_NewString(ctx, err);
+        return JS_ThrowTypeError(ctx, "socket() failed");
     }
-
+    
     struct timeval tv = {TIMEOUT_SEC, 0};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
+    
+    char *result = malloc(8192);
+    result[0] = '\0';
+    
+    // Header
+    char header[256];
+    if (resolved_host[0] && strcmp(resolved_host, dest_ip) != 0) {
+        snprintf(header, sizeof(header), "Pinging %s [%s] with 32 bytes of data:\n\n",
+                 resolved_host, dest_ip);
+    } else {
+        snprintf(header, sizeof(header), "Pinging %s with 32 bytes of data:\n\n", dest_ip);
+    }
+    strncat(result, header, 8192 - strlen(result) - 1);
+    
     int transmitted = 0, received = 0;
     double times[PING_COUNT];
-    char result[4096];
-    result[0] = '\0';
-
+    memset(times, 0, sizeof(times));
+    
     for (int seq = 0; seq < PING_COUNT; seq++) {
         struct icmp pkt;
         memset(&pkt, 0, sizeof(pkt));
@@ -99,63 +122,95 @@ JSValue js_net_ping(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
         pkt.icmp_code = 0;
         pkt.icmp_id = getpid() & 0xFFFF;
         pkt.icmp_seq = seq;
+        pkt.icmp_cksum = 0;
         pkt.icmp_cksum = icmp_checksum(&pkt, sizeof(pkt));
-
+        
         double start = get_time_ms();
-        if (sendto(sock, &pkt, sizeof(pkt), 0, (struct sockaddr*)&addr, sizeof(addr)) <= 0) {
-            strcat(result, "send failed\n");
+        if (sendto(sock, &pkt, sizeof(pkt), 0, (struct sockaddr*)addr, sizeof(*addr)) <= 0) {
+            char line[128];
+            snprintf(line, sizeof(line), "Send failed for icmp_seq=%d\n", seq + 1);
+            strncat(result, line, 8192 - strlen(result) - 1);
             continue;
         }
         transmitted++;
-
+        
         char buf[PACKET_SIZE + 64];
-        socklen_t addrlen = sizeof(addr);
-        int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr*)&addr, &addrlen);
+        struct sockaddr_in reply_addr;
+        socklen_t addrlen = sizeof(reply_addr);
+        int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr*)&reply_addr, &addrlen);
         double end = get_time_ms();
-
+        
         if (n > 0) {
-            received++;
-            double rtt = end - start;
-            times[seq] = rtt;
-            char line[128];
-            snprintf(line, sizeof(line), "64 bytes from %s: icmp_seq=%d ttl=? time=%.3f ms\n",
-                     inet_ntoa(addr.sin_addr), seq+1, rtt);
-            strcat(result, line);
+            // Parse ICMP header (skip IP header)
+            struct ip *ip_hdr = (struct ip*)buf;
+            int ip_hdr_len = ip_hdr->ip_hl * 4;
+            struct icmp *icmp_reply = (struct icmp*)(buf + ip_hdr_len);
+            
+            // Check if it's an echo reply
+            if (icmp_reply->icmp_type == ICMP_ECHOREPLY && 
+                icmp_reply->icmp_id == (getpid() & 0xFFFF)) {
+                received++;
+                double rtt = end - start;
+                times[seq] = rtt;
+                
+                char reply_ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &reply_addr.sin_addr, reply_ip, sizeof(reply_ip));
+                
+                char line[256];
+                snprintf(line, sizeof(line), 
+                        "Reply from %s: bytes=32 time=%.0fms TTL=%d\n",
+                        reply_ip, rtt, ip_hdr->ip_ttl);
+                strncat(result, line, 8192 - strlen(result) - 1);
+            }
         } else {
-            strcat(result, "Request timeout for icmp_seq\n");
-            times[seq] = 0;
+            char line[128];
+            snprintf(line, sizeof(line), "Request timed out.\n");
+            strncat(result, line, 8192 - strlen(result) - 1);
         }
-
-        usleep(1000000); // 1 sec between pings
+        
+        if (seq < PING_COUNT - 1) {
+            usleep(1000000); // 1 sec between pings
+        }
     }
-
+    
     close(sock);
+    freeaddrinfo(res);
     JS_FreeCString(ctx, host);
-
-    // compute statistics
-    double rtt_min = 1e9, rtt_max = 0, rtt_sum = 0, rtt_sum2 = 0;
+    
+    // Compute statistics
+    double rtt_min = 1e9, rtt_max = 0, rtt_sum = 0;
+    int count = 0;
     for (int i = 0; i < PING_COUNT; i++) {
         if (times[i] > 0) {
             if (times[i] < rtt_min) rtt_min = times[i];
             if (times[i] > rtt_max) rtt_max = times[i];
             rtt_sum += times[i];
-            rtt_sum2 += times[i]*times[i];
+            count++;
         }
     }
-    double rtt_avg = rtt_sum / received;
-    double rtt_mdev = 0;
-    if (received > 0) rtt_mdev = sqrt(rtt_sum2/received - rtt_avg*rtt_avg);
-
-    char stats[256];
-    snprintf(stats, sizeof(stats),
-             "%d packets transmitted, %d received, %.0f%% packet loss\n"
-             "rtt min=%.3fms avg=%.3fms max=%.3fms mdev=%.3fms\n",
-             transmitted, received, ((transmitted-received)/(double)transmitted)*100.0,
-             rtt_min, rtt_avg, rtt_max, rtt_mdev);
-
-    strcat(result, stats);
-
-    return JS_NewString(ctx, result);
+    
+    char stats[512];
+    if (received > 0) {
+        double rtt_avg = rtt_sum / count;
+        int loss_pct = ((transmitted - received) * 100) / transmitted;
+        snprintf(stats, sizeof(stats),
+                "\nPing statistics for %s:\n"
+                "    Packets: Sent = %d, Received = %d, Lost = %d (%d%% loss),\n"
+                "Approximate round trip times in milli-seconds:\n"
+                "    Minimum = %.0fms, Maximum = %.0fms, Average = %.0fms\n",
+                dest_ip, transmitted, received, transmitted - received, loss_pct,
+                rtt_min, rtt_max, rtt_avg);
+    } else {
+        snprintf(stats, sizeof(stats),
+                "\nPing statistics for %s:\n"
+                "    Packets: Sent = %d, Received = %d, Lost = %d (100%% loss)\n",
+                dest_ip, transmitted, received, transmitted);
+    }
+    strncat(result, stats, 8192 - strlen(result) - 1);
+    
+    JSValue ret = JS_NewString(ctx, result);
+    free(result);
+    return ret;
 }
 
 // net.netstat()
