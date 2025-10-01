@@ -1,6 +1,6 @@
 CC = cc
-CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE
-LDFLAGS = -lm -ldl -lreadline -lncurses
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -I$(shell brew --prefix readline)/include
+LDFLAGS = -lm -ldl -lreadline -lncurses -L$(shell brew --prefix readline)/lib
 
 # core sources
 SRC = src/main.c \

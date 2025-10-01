@@ -15,7 +15,7 @@
 #include "sys.h"
 #include "env.h"
 #include "utils.h"
-
+#include <ctype.h>
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
 int js_lib_count = 0; // Pure JS libs counter
 
@@ -484,7 +484,7 @@ void jssh_redisplay(void) {
     char *hl = highlight_line(rl_line_buffer);
     const char *line = hl ? hl : rl_line_buffer;
 
-    fputs(rl_display_prompt, stdout);
+    fputs(rl_prompt, stdout);
     fputs(line, stdout);
 
     prediction_t pred = jssh_predict(rl_line_buffer, rl_point);
