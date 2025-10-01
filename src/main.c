@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
     JS_SetPropertyStr(ctx, global_obj, "env_get", JS_NewCFunction(ctx, js_env_get, "env_get", 1));
     JS_SetPropertyStr(ctx, global_obj, "env_add", JS_NewCFunction(ctx, js_env_add, "env_add", 2));
     JS_SetPropertyStr(ctx, global_obj, "clear", JS_NewCFunction(ctx, js_clear, "clear", 0));
+    JS_SetPropertyStr(ctx, global_obj, "version", JS_NewCFunction(ctx, js_version, "version", 0));
     JS_SetPropertyStr(ctx, global_obj, "update", JS_NewCFunction(ctx, js_update, "update", 0));
 
 

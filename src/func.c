@@ -464,3 +464,8 @@ JSValue js_clear(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     fflush(stdout);
     return JS_NewString(ctx, JS_SUPPRESS);
 }
+
+// version
+JSValue js_version(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    return JS_NewString(ctx, JSSH_VERSION);
+}

@@ -14,5 +14,6 @@ JSValue js_chmod(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 JSValue js_mkdir(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue js_touch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue js_runfile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+JSValue js_version(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
 #endif
