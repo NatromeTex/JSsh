@@ -293,6 +293,120 @@ net.tracert("google.com")
 
 ---
 
+## `net.route()`
+
+* **Description**: Displays the Kernel IP routing tables.
+* **Parameters**: None
+* **Example**:
+
+```js
+net.route()
+```
+
+<br>
+
+# Crypt commands
+
+This section details the commands present in the crypt package available through the js lib. All code in this package is written in **native JS** and does not depend on external libraries to run the code in the JSsh REPL.
+
+---
+
+## `crypt.sha1("msg")`
+
+* **Description**: Calculates and displays the sha1 hash of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which hash has to be calculated.
+* **Example**:
+
+```js
+crypt.sha1("Hello")
+// F7FF9E8B7BB2E09B70935A5D785E0CC5D9D0ABF0
+```
+
+---
+
+## `crypt.sha256("msg")`
+
+* **Description**: Calculates and displays the sha256 hash of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which hash has to be calculated.
+* **Example**:
+
+```js
+crypt.sha256("Hello")
+// 185F8DB32271FE25F561A6FC938B2E264306EC304EDA518007D1764826381969
+```
+
+---
+
+## `crypt.sha512("msg")`
+
+* **Description**: Calculates and displays the sha512 hash of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which hash has to be calculated.
+* **Example**:
+
+```js
+crypt.sha512("Hello")
+// 3615F80C9D293ED7402687F94B22D58E529B8CC7916F8FAC7FDDF7FBD5AF4CF777D3D795A7A00A16BF7E7F3FB9561EE9BAAE480DA9FE7A18769E71886B03F315
+```
+
+---
+
+## `crypt.md5("msg")`
+
+* **Description**: Calculates and displays the md5 hash of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which hash has to be calculated.
+* **Example**:
+
+```js
+crypt.md5("Hello")
+// 8B1A9953C4611296A827ABF8C47804D7
+```
+
+---
+
+## `crypt.base64("msg", mode)`
+
+* **Description**: Calculates and displays the base64 encoding or decoding of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which has to be base64 encoded/decoded.
+  * `mode`   (int): 0 is encode, 1 is decode.
+* **Example**:
+
+```js
+crypt.base64("Hello", 0)
+// SGVsbG8=
+crypt.base64("SlNTSCBpcyBjb29s", 1)
+// JSSH is cool
+```
+
+---
+
+## `crypt.compare(algo, target, hash)`
+
+* **Description**: Compares the hash of the target given by the algorithm to the hash provided.
+* **Parameters**:
+
+  * `algo`   (string): Algorithm to be used.
+  * `target` (string): Target to be checked.
+  * `hash`   (string): Hash against which target is checked
+* **Example**:
+
+```js
+crypt.compare("md5", "Hello", "8B1A9953C4611296A827ABF8C47804D7")
+// true
+```
+
+---
+
+
 ### Notes
 * No shell invocation occurs for these commands (`system()` is only used internally in `update()` and `sys.sudo()` for convenience).
 * These primitives form the foundation for building more complex shell-like scripts in JSSH.
