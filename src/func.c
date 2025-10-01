@@ -460,7 +460,7 @@ JSValue js_runfile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
 
 // clear
 JSValue js_clear(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    fputs("\033[2J\033[H", stdout);
+    fputs("\033[H\033[2J\033[3J", stdout);
     fflush(stdout);
     return JS_NewString(ctx, JS_SUPPRESS);
 }

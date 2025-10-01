@@ -74,6 +74,9 @@ int main(int argc, char **argv) {
     // Init highlighting
     rl_redisplay_function = jssh_redisplay;
 
+    // Detect root
+    int is_root = (geteuid() == 0);
+
     struct passwd *pw = getpwuid(getuid());
     const char *home = getenv("HOME");
     if (!home) {
@@ -102,10 +105,19 @@ int main(int argc, char **argv) {
 
         // Prompt with readline-safe escapes
         char prompt[PATH_MAX + 512];
-        snprintf(prompt, sizeof(prompt),
-                 "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
-                 "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ",
-                 username, host, cwd);
+        if (is_root) {
+            // White prompt for root
+            snprintf(prompt, sizeof(prompt),
+                    "\001\033[38;2;255;255;255m\002%s@%s\001\033[0m\002:"
+                    "\001\033[38;2;255;255;255m\002%s\001\033[0m\002# ", 
+                    username, host, cwd);
+        } else {
+            // Green/blue prompt for normal user
+            snprintf(prompt, sizeof(prompt), 
+                    "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
+                    "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ", 
+                    username, host, cwd);
+        }
 
         char *line = readline(prompt);
         if (!line) { // EOF (Ctrl-D)

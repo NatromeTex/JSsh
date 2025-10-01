@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <termios.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <readline/readline.h>
@@ -377,7 +378,7 @@ static JSValue js_getcpu(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return obj;
 }
 
-// sys.getram
+// sys.getram()
 static JSValue js_getram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   FILE *f = fopen("/proc/meminfo", "r");
   if (!f) return JS_NewFloat64(ctx, -1);
@@ -392,6 +393,56 @@ static JSValue js_getram(JSContext *ctx, JSValueConst this_val, int argc, JSValu
   }
   fclose(f);
   return JS_NewFloat64(ctx, -1);
+}
+
+// sys.sudo()
+static JSValue js_sudo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    // Get the path to the current executable
+    char exe_path[1024];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len == -1) {
+        return JS_ThrowInternalError(ctx, "failed to get executable path");
+    }
+    exe_path[len] = '\0';
+    
+    pid_t pid = fork();
+    
+    if (pid < 0) {
+        return JS_ThrowInternalError(ctx, "fork() failed");
+    }
+    
+    if (pid == 0) {
+        // Child process - execute sudo with current executable
+        char *args[] = {"sudo", exe_path, NULL};
+        execvp("sudo", args);
+        // If execvp returns, it failed
+        perror("execvp");
+        exit(1);
+    }
+    
+    // Parent process - wait for child to complete
+    int status;
+    pid_t result;
+    
+    // Wait for the child process, handling interruptions
+    do {
+        result = waitpid(pid, &status, 0);
+    } while (result == -1 && errno == EINTR);
+    
+    if (result == -1) {
+        return JS_ThrowInternalError(ctx, "waitpid() failed");
+    }
+    
+    // Return exit status information
+    if (WIFEXITED(status)) {
+        // Child exited normally
+        return JS_NewInt32(ctx, WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        // Child was terminated by a signal (e.g., Ctrl+C)
+        return JS_NewInt32(ctx, 128 + WTERMSIG(status));
+    }
+    
+    return JS_NewInt32(ctx, -1);
 }
 
 // Register sys.* functions
@@ -418,6 +469,7 @@ void js_init_sys(JSContext *ctx) {
     JS_SetPropertyStr(ctx, sys, "getcpu", JS_NewCFunction(ctx, js_getcpu, "getcpu", 0));
     JS_SetPropertyStr(ctx, sys, "getram", JS_NewCFunction(ctx, js_getram, "getram", 0));
     JS_SetPropertyStr(ctx, sys, "arch", JS_NewCFunction(ctx, js_arch, "arch", 0));
+    JS_SetPropertyStr(ctx, sys, "sudo", JS_NewCFunction(ctx, js_sudo, "sudo", 0));
 
     JS_SetPropertyStr(ctx, global_obj, "sys", sys);
     JS_FreeValue(ctx, global_obj);

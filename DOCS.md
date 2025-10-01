@@ -3,6 +3,17 @@
 This document lists the built-in OS-level commands exposed in the JSSH REPL. Most commands are implemented in **native C** and callable from the REPL. They do **not** invoke an external shell unless explicitly noted.
 
 ---
+## `sys.sudo()`
+
+* **Description**: Runs `JSsh` with elevated privileges. Under development so be **careful** of actions performed while in running `JSsh` with root privileges.
+* **Parameters**: None
+* **Example**:
+
+```js
+sys.sudo()
+```
+
+---
 
 ## `clear()`
 
@@ -283,6 +294,6 @@ net.tracert("google.com")
 ---
 
 ### Notes
-* No shell invocation occurs for these commands (`system()` is only used internally in `update()` for convenience).
+* No shell invocation occurs for these commands (`system()` is only used internally in `update()` and `sys.sudo()` for convenience).
 * These primitives form the foundation for building more complex shell-like scripts in JSSH.
 * Installation of net-utils needs sudo on your system.

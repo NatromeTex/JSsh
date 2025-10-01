@@ -38,7 +38,7 @@ static double get_time_ms() {
     return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
 }
 
-// State table
+// state table
 static const char *tcp_state_name(unsigned int st) {
     switch (st) {
         case 1: return "ESTABLISHED";
@@ -54,6 +54,13 @@ static const char *tcp_state_name(unsigned int st) {
         case 0xB: return "CLOSING";
         default: return "UNKNOWN";
     }
+}
+
+// ip formatter
+static void format_ip(char *dst, size_t size, unsigned int ip) {
+    struct in_addr addr;
+    addr.s_addr = ip;
+    inet_ntop(AF_INET, &addr, dst, size);
 }
 
 // ---------------------------------------------------------
@@ -526,4 +533,85 @@ JSValue js_tracert(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     JSValue ret = JS_NewString(ctx, out);
     free(out);
     return ret;
+}
+
+//net.route()
+JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    FILE *fp = fopen("/proc/net/route", "r");
+    if (!fp) {
+        return JS_ThrowInternalError(ctx, "cannot open /proc/net/route: %s", 
+                                     strerror(errno));
+    }
+    
+    char line[256];
+    // Skip header line
+    if (!fgets(line, sizeof(line), fp)) {
+        fclose(fp);
+        return JS_ThrowInternalError(ctx, "empty route table");
+    }
+    
+    // Use dynamic buffer to avoid truncation
+    size_t outsize = 8192;
+    char *outbuf = malloc(outsize);
+    if (!outbuf) {
+        fclose(fp);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    
+    size_t outlen = 0;
+    int n = snprintf(outbuf + outlen, outsize - outlen,
+                     "Kernel IP routing table\n%-16s %-16s %-16s %-8s %-8s\n",
+                     "Destination", "Gateway", "Mask", "Flags", "Iface");
+    if (n < 0 || (size_t)n >= outsize - outlen) {
+        free(outbuf);
+        fclose(fp);
+        return JS_ThrowInternalError(ctx, "buffer formatting error");
+    }
+    outlen += n;
+    
+    char iface[32];
+    unsigned int dest, gateway, flags, mask;
+    unsigned int refcnt, use, metric;  // Named instead of junk
+    
+    while (fgets(line, sizeof(line), fp)) {
+        int parsed = sscanf(line, "%31s %X %X %X %u %u %u %X",
+                           iface, &dest, &gateway, &flags,
+                           &refcnt, &use, &metric, &mask);
+        if (parsed < 8)
+            continue;
+        
+        char deststr[64], gwstr[64], maskstr[64];
+        format_ip(deststr, sizeof(deststr), dest);
+        format_ip(gwstr, sizeof(gwstr), gateway);
+        format_ip(maskstr, sizeof(maskstr), mask);
+        
+        // Check if we need more space (with safety margin)
+        size_t needed = outlen + 256;
+        if (needed > outsize) {
+            size_t newsize = outsize * 2;
+            char *newbuf = realloc(outbuf, newsize);
+            if (!newbuf) {
+                free(outbuf);
+                fclose(fp);
+                return JS_ThrowOutOfMemory(ctx);
+            }
+            outbuf = newbuf;
+            outsize = newsize;
+        }
+        
+        n = snprintf(outbuf + outlen, outsize - outlen,
+                    "%-16s %-16s %-16s %-8X %-8s\n",
+                    deststr, gwstr, maskstr, flags, iface);
+        if (n < 0 || (size_t)n >= outsize - outlen) {
+            break;  // Shouldn't happen with resize logic, but be safe
+        }
+        outlen += n;
+    }
+    
+    fclose(fp);
+    
+    JSValue result = JS_NewStringLen(ctx, outbuf, outlen);
+    free(outbuf);
+    
+    return result;
 }
