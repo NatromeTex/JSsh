@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <libssh/libssh.h>
 #include <netinet/ip_icmp.h>
 #include "quickjs.h"
 
@@ -61,6 +62,111 @@ static void format_ip(char *dst, size_t size, unsigned int ip) {
     struct in_addr addr;
     addr.s_addr = ip;
     inet_ntop(AF_INET, &addr, dst, size);
+}
+
+// struct for ssh
+struct ssh_param {
+    char *user;
+    char *host;
+    long int port;
+};
+
+// free function
+void ssh_param_free(struct ssh_param *params) {
+    if (!params) {
+        return;
+    }
+    free(params->user); // free(NULL) is safe
+    free(params->host);
+    free(params);
+}
+
+struct ssh_param *ssh_param_parse(const char *input_str) {
+    if (!input_str) {
+        return NULL;
+    }
+
+    // Allocate the main struct
+    struct ssh_param *deets = malloc(sizeof(struct ssh_param));
+    if (!deets) {
+        return NULL; // Out of memory
+    }
+
+    // Initialize with defaults
+    deets->user = NULL;
+    deets->host = NULL;
+    deets->port = 22; // Default SSH port
+
+    const char *host_part_start;
+    const char *at_ptr = strchr(input_str, '@'); // Find first '@'
+
+    if (at_ptr) { // User is present
+        size_t user_len = at_ptr - input_str;
+        if (user_len == 0) {
+            fprintf(stderr, "Error: Username cannot be empty.\n");
+            ssh_param_free(deets);
+            return NULL;
+        }
+        deets->user = malloc(user_len + 1);
+        if (!deets->user) {
+            ssh_param_free(deets);
+            return NULL;
+        }
+        memcpy(deets->user, input_str, user_len);
+        deets->user[user_len] = '\0';
+        host_part_start = at_ptr + 1;
+    } else { // No user
+        host_part_start = input_str;
+    }
+    
+    // Check for empty host part
+    if (*host_part_start == '\0') {
+        fprintf(stderr, "Error: Hostname part cannot be empty.\n");
+        ssh_param_free(deets);
+        return NULL;
+    }
+
+    const char *colon_ptr = strrchr(host_part_start, ':');
+    const char *ipv6_end_bracket = strrchr(host_part_start, ']');
+
+    // A colon is a port separator if it's not part of an IPv6 address,
+    // which means it must appear *after* any ']' character.
+    if (colon_ptr && (!ipv6_end_bracket || colon_ptr > ipv6_end_bracket)) {
+        size_t host_len = colon_ptr - host_part_start;
+        if (host_len == 0) {
+            fprintf(stderr, "Error: Hostname cannot be empty.\n");
+            ssh_param_free(deets);
+            return NULL;
+        }
+        deets->host = malloc(host_len + 1);
+        if (!deets->host) {
+            ssh_param_free(deets);
+            return NULL;
+        }
+        memcpy(deets->host, host_part_start, host_len);
+        deets->host[host_len] = '\0';
+        
+        // Parse port
+        const char *port_str = colon_ptr + 1;
+        char *endptr;
+        errno = 0;
+        long port_val = strtol(port_str, &endptr, 10);
+        if (errno != 0 || *endptr != '\0' || port_val <= 0 || port_val > 65535) {
+            fprintf(stderr, "Error: Invalid port number '%s'.\n", port_str);
+            ssh_param_free(deets);
+            return NULL;
+        }
+        deets->port = port_val;
+
+    } else { // No port specified
+        deets->host = strdup(host_part_start);
+        if (!deets->host) {
+            ssh_param_free(deets);
+            return NULL;
+        }
+    }
+
+    return deets;
 }
 
 // ---------------------------------------------------------
@@ -539,8 +645,7 @@ JSValue js_tracert(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
 JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     FILE *fp = fopen("/proc/net/route", "r");
     if (!fp) {
-        return JS_ThrowInternalError(ctx, "cannot open /proc/net/route: %s", 
-                                     strerror(errno));
+        return JS_ThrowInternalError(ctx, "cannot open /proc/net/route: %s",  strerror(errno));
     }
     
     char line[256];
@@ -614,4 +719,35 @@ JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     free(outbuf);
     
     return result;
+}
+
+//net.ssh()
+JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1 || !JS_IsString(argv[0])) {
+        return JS_ThrowTypeError(ctx, "Expected connection string");
+    }
+
+    const char *input_str = JS_ToCString(ctx, argv[0]);
+    if (!input_str) {
+        return JS_EXCEPTION;
+    }
+
+    struct ssh_param * params = ssh_param_parse(input_str);
+    JS_FreeCString(ctx, input_str);
+
+    if (!params) {
+        return JS_ThrowTypeError(ctx, "Invalid SSH connection string format");
+    }
+    
+    printf("User: %s\nHost: %s\nPort: %ld\n", 
+         params->user ? params->user : "(none)",
+         params->host ? params->host : "(none)",
+         params->port);
+
+    ssh_session ssh_sesh = ssh_new();
+    if (!ssh_sesh)
+        return JS_ThrowInternalError(ctx, "SSH session could not be created");
+    ssh_free(ssh_sesh);
+
+    return JS_UNDEFINED;
 }
