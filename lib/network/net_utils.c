@@ -70,7 +70,7 @@ static void format_ip(char *dst, size_t size, unsigned int ip) {
 struct ssh_param {
     char *user;
     char *host;
-    long int port;
+    int port;
     int verbosity;
 };
 
@@ -192,70 +192,60 @@ static void enable_raw_mode() {
 
 // shell function
 int interactive_shell(ssh_session session) {
-    ssh_channel channel = ssh_channel_new(session);
-    if (channel == NULL) {
-        return -1;
-    }
-    if (ssh_channel_open_session(channel) != SSH_OK) {
-        ssh_channel_free(channel);
-        return -1;
-    }
-    if (ssh_channel_request_pty(channel) != SSH_OK) {
-        ssh_channel_close(channel);
-        ssh_channel_free(channel);
-        return -1;
-    }
-    if (ssh_channel_request_shell(channel) != SSH_OK) {
-        ssh_channel_close(channel);
-        ssh_channel_free(channel);
-        return -1;
-    }
+    ssh_channel channel = NULL;
+    int rc = -1;
+    char buffer[256];
+
+    channel = ssh_channel_new(session);
+    if (!channel) return -1;
+    if (ssh_channel_open_session(channel) != SSH_OK) goto cleanup;
+    if (ssh_channel_request_pty(channel) != SSH_OK) goto cleanup;
+    if (ssh_channel_request_shell(channel) != SSH_OK) goto cleanup;
 
     enable_raw_mode();
 
     while (1) {
         fd_set fds;
         int maxfd;
-        char buffer[256];
         int nbytes;
 
         FD_ZERO(&fds);
-        FD_SET(0, &fds);  // stdin
+        FD_SET(STDIN_FILENO, &fds);
         FD_SET(ssh_get_fd(session), &fds);
         maxfd = ssh_get_fd(session) + 1;
 
-        if (select(maxfd, &fds, NULL, NULL, NULL) < 0) {
-            break;
-        }
+        if (select(maxfd, &fds, NULL, NULL, NULL) < 0) break;
 
-        // stdin -> remote
-        if (FD_ISSET(0, &fds)) {
-            nbytes = read(0, buffer, sizeof(buffer));
-            if (nbytes <= 0) {
-                break;
-            }
+        if (FD_ISSET(STDIN_FILENO, &fds)) {
+            nbytes = read(STDIN_FILENO, buffer, sizeof(buffer));
+            if (nbytes <= 0) break;
             ssh_channel_write(channel, buffer, nbytes);
         }
 
-        // remote -> stdout
         if (FD_ISSET(ssh_get_fd(session), &fds)) {
-            if (ssh_channel_is_eof(channel)) {
+            if (ssh_channel_is_eof(channel) || ssh_channel_is_closed(channel)) {
+                /* read remaining data then break */
+                while ((nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0)) > 0)
+                    write(STDOUT_FILENO, buffer, nbytes);
                 break;
             }
             nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
-            if (nbytes > 0) {
-                write(1, buffer, nbytes);
-            }
+            if (nbytes > 0) write(STDOUT_FILENO, buffer, nbytes);
         }
     }
 
+    // success
     disable_raw_mode();
+    goto cleanup;
+    rc = 0;
 
-    ssh_channel_send_eof(channel);
-    ssh_channel_close(channel);
-    ssh_channel_free(channel);
-
-    return 0;
+cleanup:
+    if (channel) {
+        ssh_channel_send_eof(channel);
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+    }
+    return rc;
 }
 
 // host verifier for ssh
@@ -272,7 +262,9 @@ int verify_knownhost(ssh_session session)
     int rc;
  
     rc = ssh_get_server_publickey(session, &srv_pubkey);
+    printf("rc: %d\n", rc);
     if (rc < 0) {
+        printf("0\n");
         return -1;
     }
  
@@ -282,6 +274,7 @@ int verify_knownhost(ssh_session session)
                                 &hlen);
     ssh_key_free(srv_pubkey);
     if (rc < 0) {
+        printf("0\n");
         return -1;
     }
  
@@ -917,7 +910,7 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowTypeError(ctx, "Invalid SSH connection string format");
     }
     
-    printf("Connecting to: %s@%s:%ld\n", 
+    printf("Connecting to: %s@%s:%d\n", 
          params->user ? params->user : "(none)",
          params->host ? params->host : "(none)",
          params->port
@@ -932,11 +925,20 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowInternalError(ctx, "SSH session could not be created");
     }
     
-    printf("0\n");
     if (params->host) ssh_options_set(ssh_sesh, SSH_OPTIONS_HOST, params->host);
     if (params->user) ssh_options_set(ssh_sesh, SSH_OPTIONS_USER, params->user);
-    if (params->port) ssh_options_set(ssh_sesh, SSH_OPTIONS_PORT, params->port);
+    if (params->port) ssh_options_set(ssh_sesh, SSH_OPTIONS_PORT, &params->port);
     // ssh_options_set(ssh_sesh, SSH_OPTIONS_LOG_VERBOSITY, &params->verbosity);
+
+    rc = ssh_connect(ssh_sesh);
+    if (rc != SSH_OK){
+        ssh_free(ssh_sesh);
+        ssh_param_free(params);
+        return JS_ThrowInternalError(ctx, "Error connecting to %s: %s\n",
+            input_str,
+            ssh_get_error(ssh_sesh)
+        );
+    }
 
     if (verify_knownhost(ssh_sesh) < 0){
         ssh_disconnect(ssh_sesh);
@@ -955,12 +957,11 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowInternalError(ctx, "Error authenticating with password: %s\n", ssh_get_error(ssh_sesh));
     }
 
-    enable_raw_mode();
     interactive_shell(ssh_sesh);
-    disable_raw_mode();
 
     ssh_disconnect(ssh_sesh);
     ssh_free(ssh_sesh);    
+    ssh_finalize();
     ssh_param_free(params);
     return JS_UNDEFINED;
 }
