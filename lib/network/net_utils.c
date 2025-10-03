@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <termios.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <libssh/libssh.h>
@@ -69,6 +71,7 @@ struct ssh_param {
     char *user;
     char *host;
     long int port;
+    int verbosity;
 };
 
 // free function
@@ -76,7 +79,7 @@ void ssh_param_free(struct ssh_param *params) {
     if (!params) {
         return;
     }
-    free(params->user); // free(NULL) is safe
+    free(params->user);
     free(params->host);
     free(params);
 }
@@ -96,6 +99,7 @@ struct ssh_param *ssh_param_parse(const char *input_str) {
     deets->user = NULL;
     deets->host = NULL;
     deets->port = 22; // Default SSH port
+    deets->verbosity = SSH_LOG_PROTOCOL;
 
     const char *host_part_start;
     const char *at_ptr = strchr(input_str, '@'); // Find first '@'
@@ -167,6 +171,179 @@ struct ssh_param *ssh_param_parse(const char *input_str) {
     }
 
     return deets;
+}
+
+static struct termios orig_termios;
+
+// raw mode
+static void disable_raw_mode() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+}
+static void enable_raw_mode() {
+    struct termios raw;
+
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    atexit(disable_raw_mode);
+
+    raw = orig_termios;
+    cfmakeraw(&raw);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+// shell function
+int interactive_shell(ssh_session session) {
+    ssh_channel channel = ssh_channel_new(session);
+    if (channel == NULL) {
+        return -1;
+    }
+    if (ssh_channel_open_session(channel) != SSH_OK) {
+        ssh_channel_free(channel);
+        return -1;
+    }
+    if (ssh_channel_request_pty(channel) != SSH_OK) {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        return -1;
+    }
+    if (ssh_channel_request_shell(channel) != SSH_OK) {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        return -1;
+    }
+
+    enable_raw_mode();
+
+    while (1) {
+        fd_set fds;
+        int maxfd;
+        char buffer[256];
+        int nbytes;
+
+        FD_ZERO(&fds);
+        FD_SET(0, &fds);  // stdin
+        FD_SET(ssh_get_fd(session), &fds);
+        maxfd = ssh_get_fd(session) + 1;
+
+        if (select(maxfd, &fds, NULL, NULL, NULL) < 0) {
+            break;
+        }
+
+        // stdin -> remote
+        if (FD_ISSET(0, &fds)) {
+            nbytes = read(0, buffer, sizeof(buffer));
+            if (nbytes <= 0) {
+                break;
+            }
+            ssh_channel_write(channel, buffer, nbytes);
+        }
+
+        // remote -> stdout
+        if (FD_ISSET(ssh_get_fd(session), &fds)) {
+            if (ssh_channel_is_eof(channel)) {
+                break;
+            }
+            nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
+            if (nbytes > 0) {
+                write(1, buffer, nbytes);
+            }
+        }
+    }
+
+    disable_raw_mode();
+
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+
+    return 0;
+}
+
+// host verifier for ssh
+int verify_knownhost(ssh_session session)
+{
+    enum ssh_known_hosts_e state;
+    unsigned char *hash = NULL;
+    ssh_key srv_pubkey = NULL;
+    size_t hlen;
+    char buf[10];
+    char *hexa;
+    char *p;
+    int cmp;
+    int rc;
+ 
+    rc = ssh_get_server_publickey(session, &srv_pubkey);
+    if (rc < 0) {
+        return -1;
+    }
+ 
+    rc = ssh_get_publickey_hash(srv_pubkey,
+                                SSH_PUBLICKEY_HASH_SHA1,
+                                &hash,
+                                &hlen);
+    ssh_key_free(srv_pubkey);
+    if (rc < 0) {
+        return -1;
+    }
+ 
+    state = ssh_session_is_known_server(session);
+    switch (state) {
+        case SSH_KNOWN_HOSTS_OK:
+            /* OK */
+ 
+            break;
+        case SSH_KNOWN_HOSTS_CHANGED:
+            fprintf(stderr, "Host key for server changed: it is now:\n");
+            ssh_print_hexa("Public key hash", hash, hlen);
+            fprintf(stderr, "For security reasons, connection will be stopped\n");
+            ssh_clean_pubkey_hash(&hash);
+ 
+            return -1;
+        case SSH_KNOWN_HOSTS_OTHER:
+            fprintf(stderr, "The host key for this server was not found but an other"
+                    "type of key exists.\n");
+            fprintf(stderr, "An attacker might change the default server key to"
+                    "confuse your client into thinking the key does not exist\n");
+            ssh_clean_pubkey_hash(&hash);
+ 
+            return -1;
+        case SSH_KNOWN_HOSTS_NOT_FOUND:
+            fprintf(stderr, "Could not find known host file.\n");
+            fprintf(stderr, "If you accept the host key here, the file will be"
+                    "automatically created.\n");
+ 
+            /* FALL THROUGH to SSH_SERVER_NOT_KNOWN behavior */
+ 
+        case SSH_KNOWN_HOSTS_UNKNOWN:
+            hexa = ssh_get_hexa(hash, hlen);
+            fprintf(stderr,"The server is unknown. Do you trust the host key?\n");
+            fprintf(stderr, "Public key hash: %s\n", hexa);
+            ssh_string_free_char(hexa);
+            ssh_clean_pubkey_hash(&hash);
+            p = fgets(buf, sizeof(buf), stdin);
+            if (p == NULL) {
+                return -1;
+            }
+ 
+            cmp = strncasecmp(buf, "yes", 3);
+            if (cmp != 0) {
+                return -1;
+            }
+ 
+            rc = ssh_session_update_known_hosts(session);
+            if (rc < 0) {
+                fprintf(stderr, "Error %s\n", strerror(errno));
+                return -1;
+            }
+ 
+            break;
+        case SSH_KNOWN_HOSTS_ERROR:
+            fprintf(stderr, "Error %s", ssh_get_error(session));
+            ssh_clean_pubkey_hash(&hash);
+            return -1;
+    }
+ 
+    ssh_clean_pubkey_hash(&hash);
+    return 0;
 }
 
 // ---------------------------------------------------------
@@ -732,22 +909,58 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_EXCEPTION;
     }
 
-    struct ssh_param * params = ssh_param_parse(input_str);
+    struct ssh_param *params = ssh_param_parse(input_str);
     JS_FreeCString(ctx, input_str);
 
     if (!params) {
+        ssh_param_free(params);
         return JS_ThrowTypeError(ctx, "Invalid SSH connection string format");
     }
     
-    printf("User: %s\nHost: %s\nPort: %ld\n", 
+    printf("Connecting to: %s@%s:%ld\n", 
          params->user ? params->user : "(none)",
          params->host ? params->host : "(none)",
-         params->port);
+         params->port
+        );
+    
+    int rc;
+    char *password;
 
     ssh_session ssh_sesh = ssh_new();
-    if (!ssh_sesh)
+    if (!ssh_sesh){
+        ssh_param_free(params);
         return JS_ThrowInternalError(ctx, "SSH session could not be created");
-    ssh_free(ssh_sesh);
+    }
+    
+    printf("0\n");
+    if (params->host) ssh_options_set(ssh_sesh, SSH_OPTIONS_HOST, params->host);
+    if (params->user) ssh_options_set(ssh_sesh, SSH_OPTIONS_USER, params->user);
+    if (params->port) ssh_options_set(ssh_sesh, SSH_OPTIONS_PORT, params->port);
+    // ssh_options_set(ssh_sesh, SSH_OPTIONS_LOG_VERBOSITY, &params->verbosity);
 
+    if (verify_knownhost(ssh_sesh) < 0){
+        ssh_disconnect(ssh_sesh);
+        ssh_free(ssh_sesh);    
+        ssh_param_free(params);
+        return JS_UNDEFINED;
+    }
+
+    printf("%s@%s's password: ", params->user, params->host);
+    password = getpass("");
+    rc = ssh_userauth_password(ssh_sesh, NULL, password);
+    if (rc != SSH_AUTH_SUCCESS){
+        ssh_disconnect(ssh_sesh);
+        ssh_free(ssh_sesh);    
+        ssh_param_free(params);
+        return JS_ThrowInternalError(ctx, "Error authenticating with password: %s\n", ssh_get_error(ssh_sesh));
+    }
+
+    enable_raw_mode();
+    interactive_shell(ssh_sesh);
+    disable_raw_mode();
+
+    ssh_disconnect(ssh_sesh);
+    ssh_free(ssh_sesh);    
+    ssh_param_free(params);
     return JS_UNDEFINED;
 }
