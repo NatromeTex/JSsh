@@ -174,27 +174,32 @@ struct ssh_param *ssh_param_parse(const char *input_str) {
 }
 
 static struct termios orig_termios;
+static int raw_mode_active = 0;
 
 // raw mode
-static void disable_raw_mode() {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-}
 static void enable_raw_mode() {
+    if (raw_mode_active) return;  // Already enabled
+    
     struct termios raw;
-
     tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disable_raw_mode);
-
     raw = orig_termios;
     cfmakeraw(&raw);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    raw_mode_active = 1;
+}
+
+static void disable_raw_mode() {
+    if (!raw_mode_active) return;  // Already disabled
+    
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    raw_mode_active = 0;
 }
 
 // shell function
 int interactive_shell(ssh_session session) {
     ssh_channel channel = NULL;
     int rc = -1;
-    char buffer[256];
+    char buffer[2048]; // allocate 2MB for I/O buffer
 
     channel = ssh_channel_new(session);
     if (!channel) return -1;
@@ -204,7 +209,7 @@ int interactive_shell(ssh_session session) {
 
     enable_raw_mode();
 
-    while (1) {
+    while (ssh_channel_is_open(channel) && !ssh_channel_is_eof(channel)) {
         fd_set fds;
         int maxfd;
         int nbytes;
@@ -214,39 +219,49 @@ int interactive_shell(ssh_session session) {
         FD_SET(ssh_get_fd(session), &fds);
         maxfd = ssh_get_fd(session) + 1;
 
-        if (select(maxfd, &fds, NULL, NULL, NULL) < 0) break;
+        int sel = select(maxfd, &fds, NULL, NULL, NULL);
+        if (sel < 0) break;
 
+        // User input → remote
         if (FD_ISSET(STDIN_FILENO, &fds)) {
             nbytes = read(STDIN_FILENO, buffer, sizeof(buffer));
-            if (nbytes <= 0) break;
+            if (nbytes <= 0) {
+                // User input closed (Ctrl-D)
+                ssh_channel_send_eof(channel);
+                break;
+            }
             ssh_channel_write(channel, buffer, nbytes);
         }
 
+        // Remote output → user
         if (FD_ISSET(ssh_get_fd(session), &fds)) {
             if (ssh_channel_is_eof(channel) || ssh_channel_is_closed(channel)) {
-                /* read remaining data then break */
-                while ((nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0)) > 0)
+                // Drain remaining output before exit
+                while ((nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0)) > 0)
                     write(STDOUT_FILENO, buffer, nbytes);
                 break;
             }
+
             nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
-            if (nbytes > 0) write(STDOUT_FILENO, buffer, nbytes);
+            if (nbytes > 0)
+                write(STDOUT_FILENO, buffer, nbytes);
         }
     }
 
-    // success
-    disable_raw_mode();
-    goto cleanup;
     rc = 0;
 
 cleanup:
+    disable_raw_mode();
+
     if (channel) {
         ssh_channel_send_eof(channel);
         ssh_channel_close(channel);
         ssh_channel_free(channel);
     }
+
     return rc;
 }
+
 
 // host verifier for ssh
 int verify_knownhost(ssh_session session)
@@ -262,7 +277,6 @@ int verify_knownhost(ssh_session session)
     int rc;
  
     rc = ssh_get_server_publickey(session, &srv_pubkey);
-    printf("rc: %d\n", rc);
     if (rc < 0) {
         printf("0\n");
         return -1;
@@ -281,7 +295,7 @@ int verify_knownhost(ssh_session session)
     state = ssh_session_is_known_server(session);
     switch (state) {
         case SSH_KNOWN_HOSTS_OK:
-            /* OK */
+            // OK
  
             break;
         case SSH_KNOWN_HOSTS_CHANGED:
@@ -304,7 +318,7 @@ int verify_knownhost(ssh_session session)
             fprintf(stderr, "If you accept the host key here, the file will be"
                     "automatically created.\n");
  
-            /* FALL THROUGH to SSH_SERVER_NOT_KNOWN behavior */
+            // FALL THROUGH to SSH_SERVER_NOT_KNOWN behavior
  
         case SSH_KNOWN_HOSTS_UNKNOWN:
             hexa = ssh_get_hexa(hash, hlen);

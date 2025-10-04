@@ -224,6 +224,25 @@ This section details the commands present in the Net Utils package available ins
 
 ---
 
+## `net.ssh(host)`
+
+* **Description**: Opens an SSH session to the host defined in the connection string.
+* **Parameters**: 
+  * `host` (string): Connection string of the remote machine. Can be in the format `user@host` or `user@host:port`.
+* **Example**:
+
+```js
+net.ssh("user@192.168.1.2")
+// Connecting to user@192.168.1.2
+// The server is unknown. Do you trust the host key?
+// Public key hash: AA:BB:CC:DD:EE:FF::XX:YY:ZZ [yes/NO]: yes
+// user@192.168.1.2's password: 
+//
+// user@192.168.1.2:~$
+```
+
+---
+
 ## `net.ping(IP)`
 
 * **Description**: Pings the given IP address and returns responses.

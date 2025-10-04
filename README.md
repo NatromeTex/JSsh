@@ -60,7 +60,7 @@ Because who doesn’t want their shell to throw exceptions instead of exit codes
 
 2. Add readline dependencies
     ```bash
-    sudo apt-get install libreadline-dev
+    sudo apt-get install libreadline-dev libssh-dev
     ```
     This will install the readline library which is required for command history
 
