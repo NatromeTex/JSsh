@@ -175,14 +175,17 @@ static void print_perms(mode_t mode) {
     printf("%s ", buf);
 }
 
-JSValue js_ls(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv) {
+JSValue js_ls(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     const char *path = ".";
     const char *flag = NULL;
 
     if (argc > 0) {
         path = JS_ToCString(ctx, argv[0]);
         if (!path) return JS_EXCEPTION;
+        if (path[0] == '\0'){
+            JS_FreeCString(ctx, path);
+            path = JS_ToCString(ctx, JS_NewString(ctx, "./"));
+        }
     }
     if (argc > 1) {
         flag = JS_ToCString(ctx, argv[1]);

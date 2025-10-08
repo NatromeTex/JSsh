@@ -64,20 +64,21 @@ static JSValue js_sys_read(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     if (JS_ToInt32(ctx, &fd, argv[0]) || JS_ToInt32(ctx, &len, argv[1]))
         return JS_EXCEPTION;
 
-    char *buf = malloc(len + 1);
+    uint8_t *buf = js_malloc(ctx, len);
     if (!buf) return JS_EXCEPTION;
 
     ssize_t n = read(fd, buf, len);
     if (n < 0) {
-        free(buf);
+        js_free(ctx, buf);
         return JS_ThrowInternalError(ctx, "read failed: %s", strerror(errno));
     }
-    buf[n] = '\0';
 
-    JSValue ret = JS_NewStringLen(ctx, buf, n);
-    free(buf);
+    // Return as ArrayBuffer so JS sees exact bytes
+    JSValue ret = JS_NewArrayBufferCopy(ctx, buf, n);
+    js_free(ctx, buf);
     return ret;
 }
+
 
 // sys.write(fd, data)
 static JSValue js_sys_write(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
