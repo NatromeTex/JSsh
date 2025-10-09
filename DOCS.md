@@ -26,6 +26,7 @@ clear()
 ```
 
 ---
+
 ## `cat(path)`
 
 * **Description**: Prints the contents of a file to stdout.
@@ -36,6 +37,20 @@ clear()
 
 ```js
 cat("file.txt")
+```
+
+---
+
+## `tac(path)`
+
+* **Description**: Prints the contents of a file to stdout in reverse order.
+* **Parameters**:
+
+  * `path` (string): Path to the file to read.
+* **Example**:
+
+```js
+tac("file.txt")
 ```
 
 ---
@@ -360,6 +375,20 @@ crypt.sha256("Hello")
 
 ---
 
+## `crypt.sha384("msg")`
+
+* **Description**: Calculates and displays the sha384 hash of the provided message.
+* **Parameters**:
+
+  * `msg` (string): String of which hash has to be calculated.
+* **Example**:
+
+```js
+crypt.sha384("Hello")
+// 3519FE5AD2C596EFE3E276A6F351B8FC0B03DB861782490D45F7598EBD0AB5FD5520ED102F38C4A5EC834E98668035FC
+```
+
+---
 ## `crypt.sha512("msg")`
 
 * **Description**: Calculates and displays the sha512 hash of the provided message.
@@ -390,6 +419,24 @@ crypt.md5("Hello")
 
 ---
 
+## `crypt.hmac(algo, msg, key)`
+
+* **Description**: Provides Hash-based Message Authentication Code for the specified key and message.
+* **Parameters**:
+
+  * `algo`   (string): Algorithm to be used.
+  * `msg`    (string): Message to be hashed.
+  * `key`    (string): Key which is used to authenticate.
+* **Example**:
+
+```js
+crypt.hmac("sha256", "World", "Hello")
+// 59168E309F2C97DD04E45BE3E79BD9ACB6D22FDA6546C00C539282C41EEB916E
+```
+
+---
+
+
 ## `crypt.base64("msg", mode)`
 
 * **Description**: Calculates and displays the base64 encoding or decoding of the provided message.
@@ -408,6 +455,36 @@ crypt.base64("SlNTSCBpcyBjb29s", 1)
 
 ---
 
+## `crypt.byteDump(path)`
+
+* **Description**: Dumps the bytes of the file at the path specified. Used to hash files
+* **Parameters**:
+
+  * `path` (string): Path of file that needs to be hashed.
+* **Example**:
+
+```js
+crypt.sha512(crypt.byteDump("./bin/jssh"))
+// B3DE8B0DFB9981AAA913EB01EA37F24C4DD1A1E35E397971B41337057025CCE531CBD43B5DFCC714FCDF0B14276EAB9553AB6EBB4A1F6097A4F901A605F731B5
+```
+
+---
+
+## `crypt.randomBytes(length)`
+
+* **Description**: Provides the number of random bytes specified by `length` from `/dev/urandom`. (linux only) 
+* **Parameters**:
+
+  * `length` (number): Number of bytes to be calculated.
+* **Example**:
+
+```js
+crypt.randomBytes(10)
+// 72,6,221,165,22,92,40,145,140,47
+```
+
+---
+
 ## `crypt.compare(algo, target, hash)`
 
 * **Description**: Compares the hash of the target given by the algorithm to the hash provided.
@@ -415,7 +492,7 @@ crypt.base64("SlNTSCBpcyBjb29s", 1)
 
   * `algo`   (string): Algorithm to be used.
   * `target` (string): Target to be checked.
-  * `hash`   (string): Hash against which target is checked
+  * `hash`   (string): Hash against which target is checked.
 * **Example**:
 
 ```js

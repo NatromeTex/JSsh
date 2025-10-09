@@ -37,4 +37,4 @@ ifeq ($(NEED_SETCAP),yes)
 endif
 
 clean:
-	rm -f $(OBJ) bin/jssh
+	rm -f $(OBJ)
