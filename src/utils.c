@@ -479,7 +479,7 @@ static prediction_t jssh_predict(const char *buf, int point) {
 }
 
 void jssh_redisplay(void) {
-    fputs("\033[2K\r", stdout);
+    fputs("\033[H\033[J", stdout);
 
     char *hl = highlight_line(rl_line_buffer);
     const char *line = hl ? hl : rl_line_buffer;
