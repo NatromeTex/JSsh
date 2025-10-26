@@ -10,6 +10,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "sys.h"
@@ -18,6 +19,7 @@
 
 static int g_color_mode = 8; // 8, 256, or 16777216 (truecolor)
 int js_lib_count = 0; // Pure JS libs counter
+static int g_previous_lines = 1; // Lines drawn by readline
 
 // History path setup
 // Call this at startup
@@ -132,6 +134,49 @@ void print_name(const char *name, mode_t mode) {
     else                     color = env_get("color_reg", "{white}");
 
     printR("%s%s{reset}", color, name);
+}
+
+int get_terminal_dimensions(int *width, int *height) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+        return -1;
+    }
+    *width = ws.ws_col;
+    *height = ws.ws_row;
+    return 0;
+}
+
+int visual_width(const char *str) {
+    int width = 0;
+    if (!str) return 0;
+
+    while (*str) {
+        if (*str == '\033') {
+            str++;
+            if (*str == '[') {
+                str++;
+                while ((*str >= '0' && *str <= '9') || *str == ';') {
+                    str++;
+                }
+                if (*str) str++;
+            }
+        } else {
+            width++;
+            str++;
+        }
+    }
+    return width;
+}
+
+char* rl_line_buffer_slice(int start, int end) {
+    int len = end - start;
+    if (len < 0) len = 0;
+    char *slice = malloc(len + 1);
+    if (slice) {
+        strncpy(slice, rl_line_buffer + start, len);
+        slice[len] = '\0';
+    }
+    return slice;
 }
 
 // update
@@ -479,15 +524,24 @@ static prediction_t jssh_predict(const char *buf, int point) {
 }
 
 void jssh_redisplay(void) {
-    fputs("\033[H\033[J", stdout);
+    fputs("\r", stdout);
+
+    if(g_previous_lines > 1) {
+        fprintf(stdout, "\033[%dA", g_previous_lines - 1);
+    }
+    fputs("\033[J", stdout);
+
+    int w, h;
+    if (get_terminal_dimensions(&w, &h) == -1) {
+        w = 80;
+    }
 
     char *hl = highlight_line(rl_line_buffer);
     const char *line = hl ? hl : rl_line_buffer;
+    prediction_t pred = jssh_predict(rl_line_buffer, rl_point);
 
     fputs(rl_display_prompt, stdout);
     fputs(line, stdout);
-
-    prediction_t pred = jssh_predict(rl_line_buffer, rl_point);
 
     if (pred.active && pred.text) {
         fputs("\033[90m", stdout);
@@ -495,14 +549,34 @@ void jssh_redisplay(void) {
         fputs("\033[0m", stdout);
     }
 
-    int cur = rl_point;
-    int end = rl_end;
-    if (end > cur || (pred.active && pred.text)) {
-        int back = (end - cur) + (pred.active ? (int)strlen(pred.text) : 0);
-        fprintf(stdout, "\033[%dD", back);
+    int prompt_len = visual_width(rl_display_prompt);
+    int line_len = visual_width(line);
+    int pred_len = 0;
+    if (pred.active && pred.text) {
+        pred_len = visual_width(pred.text);
+    }
+
+    int total_visual_len = prompt_len + line_len + pred_len;
+
+    if (total_visual_len == 0) {
+        g_previous_lines = 1;
+    } else {
+        g_previous_lines = (total_visual_len - 1) / w + 1;
+    }
+    char *buffer_slice = rl_line_buffer_slice(0, rl_point);
+    int cur_visual_pos = visual_width(buffer_slice);
+    if (buffer_slice) free(buffer_slice);
+    int line_visual_len = visual_width(rl_line_buffer);
+
+    if (rl_point < rl_end || (pred.active && pred.text)) {
+        int cols_to_end_of_line = line_visual_len - cur_visual_pos;
+        int back = cols_to_end_of_line + pred_len;
+
+        if (back > 0) {
+            fprintf(stdout, "\033[%dD", back);
+        }
     }
 
     fflush(stdout);
     if (hl) free(hl);
 }
-
