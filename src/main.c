@@ -18,11 +18,19 @@
 #include "sys.h"
 #include "env.h"
 
+// Network package
 #ifdef ENABLE_NETWORK
 extern void js_init_network(JSContext *ctx);
 #endif
 #ifndef ENABLE_NETWORK
 static void js_init_network(JSContext *ctx) {}
+#endif
+// Compiler package
+#ifdef ENABLE_COMPILER
+extern void js_init_compiler(JSContext *ctx);
+#endif
+#ifndef ENABLE_COMPILER
+static void js_init_compiler(JSContext *ctx) {}
 #endif
 
 extern const char *history_file;
@@ -67,6 +75,7 @@ int main(int argc, char **argv) {
 
     // Module library conditional imports
     js_init_network(ctx);
+    js_init_compiler(ctx);
 
 
     // Init keybindings for autocomplete
