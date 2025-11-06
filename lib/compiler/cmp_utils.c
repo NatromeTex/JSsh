@@ -16,6 +16,15 @@ static const char *compilers[] = {
     NULL
 };
 
+typedef struct {
+    const char *name;
+    char *version;
+} CompilerInfo;
+
+CompilerInfo detected[20];
+int detected_count = 0;
+
+
 static char *get_version_output(const char *cmd) {
     char command[256];
     snprintf(command, sizeof(command), "%s --version 2>&1", cmd);
@@ -28,33 +37,69 @@ static char *get_version_output(const char *cmd) {
     if (n == 0) return NULL;
     buf[n] = '\0';
 
-    // Stop at first newline
     char *newline = strchr(buf, '\n');
     if (newline) *newline = '\0';
 
-    // Skip missing/invalid output
     if (strncmp(buf, "sh:", 3) == 0 || strstr(buf, "not found") || strstr(buf, "command not found"))
         return NULL;
 
     return strdup(buf);
 }
 
-JSValue js_compiler_list(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    char result[4096];
-    result[0] = '\0';
+void detect_compilers(void) {
+    detected_count = 0;
 
     for (int i = 0; compilers[i]; i++) {
         char *out = get_version_output(compilers[i]);
         if (out) {
-            snprintf(result + strlen(result),
-                     sizeof(result) - strlen(result),
-                     "%s: %s\n", compilers[i], out);
-            free(out);
+            detected[detected_count].name = compilers[i];
+            detected[detected_count].version = out;
+            detected_count++;
         }
     }
+}
 
-    if (strlen(result) == 0)
-        strcpy(result, "No compilers found.\n");
+JSValue js_compiler_list(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (detected_count == 0)
+        detect_compilers();
+
+    if (detected_count == 0)
+        return JS_NewString(ctx, "No compilers found.");
+
+    char result[4096];
+    result[0] = '\0';
+
+    for (int i = 0; i < detected_count; i++) {
+        if (i > 0)
+            strncat(result, "\n", sizeof(result) - strlen(result) - 1);
+        snprintf(result + strlen(result), sizeof(result) - strlen(result), "%s: %s", detected[i].name, detected[i].version);
+    }
 
     return JS_NewString(ctx, result);
+}
+
+JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic ,JSValueConst *func_data) {
+    // magic is required by QuickJS but not used here
+    const char *compiler = JS_ToCString(ctx, func_data[0]);
+    const char *file = JS_ToCString(ctx, argv[0]);
+
+    if (!compiler || !file)
+        return JS_ThrowTypeError(ctx, "compiler or file missing");
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "%s %s 2>&1", compiler, file);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp)
+        return JS_ThrowInternalError(ctx, "failed to execute");
+
+    char buf[1024];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    pclose(fp);
+    buf[n] = '\0';
+
+    JS_FreeCString(ctx, compiler);
+    JS_FreeCString(ctx, file);
+
+    return JS_NewString(ctx, buf);
 }

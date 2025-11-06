@@ -339,7 +339,7 @@ net.route()
 
 <br>
 
-# Crypt commands
+# Crypt Utils commands
 
 This section details the commands present in the crypt package available through the js lib. All code in this package is written in **native JS** and does not depend on external libraries to run the code in the JSsh REPL.
 
@@ -499,8 +499,51 @@ crypt.randomBytes(10)
 crypt.compare("md5", "Hello", "8B1A9953C4611296A827ABF8C47804D7")
 // true
 ```
+<br>
+
+# Compiler Utils commands
+
+This section details the commands present in the compiler package available through the compiler module. All code in this package is written in **C** and does not depend on external libraries to run the code in the JSsh REPL. It does require the compilers be installed on the system and registered in `$PATH` to be visible to the detection logic.
 
 ---
+**Supported compilers:** Python, Python3, gcc, g++, clang, javac, rustc, go, node.
+
+---
+## `cmp.list()`
+
+* **Description**: Displays a list of all compilers detected by JSsh and their versions.
+* **Parameters**: None
+* **Example**:
+
+```js
+cmp.list()
+// python3: Python 3.12.3
+// gcc: gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
+// g++: g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
+```
+
+---
+## `cmp.<compiler_name>("path, flags")`
+
+* **Description**: Runs the specified compiler with the given path and flags.
+* **Parameters**:
+
+  * `path` (string): Path at which file to be compiled is present.
+  * `flags` (string): Other flags which can be passed to the compiler
+* **Example**:
+
+```js
+cmp.python3("./hello.py")
+// Hello, World!
+cmp.gcc("./Home/User/Desktop/main.c -o main")
+// !$ ./main
+// Hello, World!
+cmp.javac("../Test.java")
+// !$ java ../Test
+// System.out.println is working!
+```
+
+
 
 
 ### Notes
