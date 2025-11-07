@@ -12,6 +12,7 @@ extern CompilerInfo detected[];
 extern int detected_count;
 
 void detect_compilers(void);
+JSValue js_auto_compile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue js_compiler_list(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic,JSValueConst *func_data);
 

@@ -542,7 +542,26 @@ cmp.javac("../Test.java")
 // !$ java ../Test
 // System.out.println is working!
 ```
+---
+## `cmp.auto("path")`
 
+* **Description**: Auto-detects the best compiler for the given file and compiles it, reports back if the compiler required for the file is not found.
+* **Parameters**: 
+    
+  * `path` (string): Path to file to be compiled
+* **Example**:
+
+```js
+cmp.auto("hello.py")
+// Hello, World!
+cmp.auto("/Home/User/Desktop/main.c -o main")
+// !$ ./main
+// Hello, World!
+cmp.auto("Test.java")
+// !$ java ../Test
+// System.out.println is working!
+```
+---
 
 
 

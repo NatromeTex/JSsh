@@ -8,6 +8,7 @@ void js_init_compiler(JSContext *ctx) {
   if (detected_count == 0)
     detect_compilers();
 
+  JS_SetPropertyStr(ctx, cmp, "auto", JS_NewCFunction(ctx, js_auto_compile, "auto", 0));
   JS_SetPropertyStr(ctx, cmp, "list", JS_NewCFunction(ctx, js_compiler_list, "list", 0));
   for (int i = 0; i < detected_count; i++) {
     const char *name = detected[i].name;
