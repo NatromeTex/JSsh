@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -47,7 +48,7 @@ static const AutoMap auto_map[] = {
 
 CompilerInfo detected[20];
 int detected_count = 0;
-
+static volatile pid_t current_child_pid = 0;
 
 static char *get_version_output(const char *cmd) {
     char command[256];
@@ -80,6 +81,13 @@ void detect_compilers(void) {
             detected[detected_count].version = out;
             detected_count++;
         }
+    }
+}
+
+static void sigint_handler(int sig) {
+    (void)sig;
+    if (current_child_pid > 0) {
+        kill(current_child_pid, SIGINT);
     }
 }
 
@@ -141,7 +149,15 @@ JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         _exit(127);
     }
     
-    // Parent: Set up terminal for raw mode
+    // Parent: Setup signal handler
+    current_child_pid = pid;
+    struct sigaction sa, old_sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, &old_sa);
+    
+    // Set up terminal for raw mode
     struct termios orig_termios;
     tcgetattr(STDIN_FILENO, &orig_termios);
     struct termios raw = orig_termios;
@@ -209,6 +225,10 @@ JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValue
             child_running = 0;
         }
     }
+    
+    // Restore signal handler
+    sigaction(SIGINT, &old_sa, NULL);
+    current_child_pid = 0;
     
     // Restore terminal
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
@@ -263,7 +283,15 @@ JSValue js_auto_compile(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         _exit(127);
     }
     
-    // Parent: Set up terminal for raw mode
+    // Parent: Setup signal handler
+    current_child_pid = pid;
+    struct sigaction sa, old_sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, &old_sa);
+    
+    // Set up terminal for raw mode
     struct termios orig_termios;
     tcgetattr(STDIN_FILENO, &orig_termios);
     struct termios raw = orig_termios;
@@ -331,6 +359,10 @@ JSValue js_auto_compile(JSContext *ctx, JSValueConst this_val, int argc, JSValue
             child_running = 0;
         }
     }
+    
+    // Restore signal handler
+    sigaction(SIGINT, &old_sa, NULL);
+    current_child_pid = 0;
     
     // Restore terminal
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
