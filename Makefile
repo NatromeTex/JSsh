@@ -36,6 +36,18 @@ SRC += lib/fs/module.c \
 CFLAGS += -DENABLE_FS
 endif
 
+ifeq "$(MODULES)" "all"
+SRC += lib/network/module.c \
+       lib/network/net_utils.c \
+       lib/compiler/module.c \
+       lib/compiler/cmp_utils.c \
+       lib/fs/module.c \
+       lib/fs/fs_utils.c
+CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS
+NEED_SETCAP = yes
+endif
+
+
 OBJ = $(SRC:.c=.o)
 
 all: bin/jssh

@@ -410,6 +410,7 @@ void init_qol_bindings(void) {
 // Syntax Highliting
 #define CLR_RESET   "\033[0m"
 #define CLR_KEYWORD "\033[38;2;85;130;231m"  // blue
+#define CLR_OBJECT  "\033[38;2;116;180;214m" // light blue
 #define CLR_STRING  "\033[38;2;206;145;120m"  // brown
 #define CLR_NUMBER  "\033[38;2;148;206;110m"  // faded yellow
 #define CLR_FUNCTION "\033[38;2;220;220;110m" // yelow
@@ -417,6 +418,9 @@ void init_qol_bindings(void) {
 static const char *js_keywords[] = {
     "function","return","if","else","while","for","var","let","const",
     "true","false","null","undefined","new","class","import","export",NULL
+};
+static const char *js_objects[] = {
+    "fs", "cmp", "net", "crypt", "sys", NULL 
 };
 
 static char *highlight_line(const char *line) {
@@ -467,14 +471,34 @@ static char *highlight_line(const char *line) {
             continue;
         }
 
-        // identifiers → check for function name (followed by '(')
+        // identifiers
         if (isalpha((unsigned char)*p) || *p == '_') {
             const char *start = p;
             while (isalnum((unsigned char)*p) || *p == '_') p++;
             size_t len = p - start;
-            if (*p == '(') {
+
+            const char *next = p;
+            while (isspace((unsigned char)*next)) next++;
+
+            if (*next == '(') {
+                // function call
                 dst += sprintf(dst, "%s%.*s%s", CLR_FUNCTION, (int)len, start, CLR_RESET);
+            } else if (*next == '.') {
+                // check for known object (fs, net, crypto, etc.)
+                int is_known = 0;
+                for (int i = 0; js_objects[i]; i++) {
+                    if (len == strlen(js_objects[i]) &&
+                        strncmp(start, js_objects[i], len) == 0) {
+                        is_known = 1;
+                        break;
+                    }
+                }
+                if (is_known)
+                    dst += sprintf(dst, "%s%.*s%s", CLR_OBJECT, (int)len, start, CLR_RESET);
+                else
+                    dst += sprintf(dst, "%.*s", (int)len, start);
             } else {
+                // plain identifier
                 dst += sprintf(dst, "%.*s", (int)len, start);
             }
             continue;
