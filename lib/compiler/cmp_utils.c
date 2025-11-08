@@ -10,6 +10,9 @@
 #include <sys/wait.h>
 #include "sys/select.h"
 
+#define JS_SUPPRESS "\x1B[JSSH_SUPPRESS"
+
+// List of known compilers
 static const char *compilers[] = {
     "python",
     "python3",
@@ -33,6 +36,7 @@ typedef struct {
     const char *compiler;
 } AutoMap;
 
+// Mapping of file extensions to compilers
 static const AutoMap auto_map[] = {
     { ".c",   "gcc" },
     { ".cpp", "g++" },
@@ -50,6 +54,7 @@ CompilerInfo detected[20];
 int detected_count = 0;
 static volatile pid_t current_child_pid = 0;
 
+// Compiler version detector
 static char *get_version_output(const char *cmd) {
     char command[256];
     snprintf(command, sizeof(command), "%s --version 2>&1", cmd);
@@ -102,7 +107,9 @@ static const char *detect_compiler_by_ext(const char *filename) {
     return NULL;
 }
 
+// ---------------------------------------------------------
 
+// cpm.list()
 JSValue js_compiler_list(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (detected_count == 0)
         detect_compilers();
@@ -122,6 +129,7 @@ JSValue js_compiler_list(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return JS_NewString(ctx, result);
 }
 
+// cmp.<compiler>()
 JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValueConst *func_data) {
     (void)magic;
     const char *compiler = JS_ToCString(ctx, func_data[0]);
@@ -237,9 +245,10 @@ JSValue js_run_compiler(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     JS_FreeCString(ctx, compiler);
     JS_FreeCString(ctx, file);
     
-    return JS_UNDEFINED;
+    return JS_NewString(ctx, JS_SUPPRESS);
 }
 
+// cmp.auto()
 JSValue js_auto_compile(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "filename required");
@@ -370,5 +379,5 @@ JSValue js_auto_compile(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     
     JS_FreeCString(ctx, file);
     
-    return JS_UNDEFINED;
+    return JS_NewString(ctx, JS_SUPPRESS);
 }

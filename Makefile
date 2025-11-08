@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.5.7\"
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.5.8\"
 LDFLAGS = -lm -ldl -lreadline -lncurses -lssh
 
 # core sources
@@ -28,6 +28,12 @@ ifneq ($(findstring compiler,$(MODULES)),)
 SRC += lib/compiler/module.c \
        lib/compiler/cmp_utils.c 
 CFLAGS += -DENABLE_COMPILER
+endif
+
+ifneq ($(findstring fs,$(MODULES)),)
+SRC += lib/fs/module.c \
+       lib/fs/fs_utils.c
+CFLAGS += -DENABLE_FS
 endif
 
 OBJ = $(SRC:.c=.o)

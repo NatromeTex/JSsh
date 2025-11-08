@@ -84,6 +84,7 @@ void ssh_param_free(struct ssh_param *params) {
     free(params);
 }
 
+// parse ssh params
 struct ssh_param *ssh_param_parse(const char *input_str) {
     if (!input_str) {
         return NULL;

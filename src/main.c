@@ -32,6 +32,13 @@ extern void js_init_compiler(JSContext *ctx);
 #ifndef ENABLE_COMPILER
 static void js_init_compiler(JSContext *ctx) {}
 #endif
+// FileSystem package
+#ifdef ENABLE_FS
+extern void js_init_fs(JSContext *ctx);
+#endif
+#ifndef ENABLE_FS
+static void js_init_fs(JSContext *ctx) {}
+#endif
 
 extern const char *history_file;
 
@@ -76,6 +83,7 @@ int main(int argc, char **argv) {
     // Module library conditional imports
     js_init_network(ctx);
     js_init_compiler(ctx);
+    js_init_fs(ctx);
 
 
     // Init keybindings for autocomplete

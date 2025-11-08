@@ -503,7 +503,7 @@ crypt.compare("md5", "Hello", "8B1A9953C4611296A827ABF8C47804D7")
 
 # Compiler Utils commands
 
-This section details the commands present in the compiler package available through the compiler module. All code in this package is written in **C** and does not depend on external libraries to run the code in the JSsh REPL. It does require the compilers be installed on the system and registered in `$PATH` to be visible to the detection logic.
+This section details the commands present in the compiler package available by installing the **compiler** module. All code in this package is written in **native C** and does not depend on external libraries to run the code in the JSsh REPL. It does require the compilers be installed on the system and registered in `$PATH` to be visible to the detection logic.
 
 ---
 **Supported compilers:** Python, Python3, gcc, g++, clang, javac, rustc, go, node.
@@ -561,6 +561,70 @@ cmp.auto("Test.java")
 // !$ java ../Test
 // System.out.println is working!
 ```
+<br>
+
+# File System Utils commands
+
+This section details the commands present in the File-System package by installing the **fs** module. All code in this package is written in **native C** and does not depend on external libraries to run the code in the JSsh REPL.
+
+---
+## `fs.tree("path")`
+
+* **Description**: Displays a tree of all directories and subdirectories in the given path.
+* **Parameters**:
+
+  * `path` (string): Path from which tree is called.
+* **Example**:
+
+```js
+fs.tree("./lib")
+// .
+// compiler
+// ├── cmp_utils.h
+// ├── cmp_utils.o
+// ├── module.c
+// ├── module.o
+// └── cmp_utils.c
+// js
+// ├── jsfetch.js
+// ├── crypt.js
+// ├── help.js
+// └── Date.js
+// fs
+// ├── module.o
+// ├── module.c
+// ├── fs_utils.c
+// ├── fs_utils.o
+// └── fs_utils.h
+// network
+// ├── net_utils.o
+// ├── net_utils.h
+// ├── net_utils.c
+// ├── module.o
+// └── module.c
+```
+---
+## `fs.find("path", {flags})`
+
+* **Description**: Searches through the given directory recursively till the specified file is found.
+* **Parameters**: 
+
+  * `path` (string): Directory from which search will be started.
+  * `flags` (JSON): Flags to help enhance the search.
+    * `name` (string): Uses Fnmatch to search for names, wild-card characters are allowed.
+    * `type` (char): '`f`': File only | '`d`': Directory only.
+    * `minsize` (int): Skip files below this size.
+    * `depth` (int): The subdirectory depth to which the function will search.
+* **Example**:
+
+```js
+fs.find(".", { name: "main.c", type: "f"})
+// ./src/main.c
+
+fs.find("./lib", { name: "*.c", type: "f", depth: 2})
+// ./compiler/cmp_utils.c,./compiler/module.c,./fs/fs_utils.c,./fs/module.c,./network/module.c,./network/net_utils.c
+```
+
 ---
 
 
