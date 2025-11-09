@@ -39,6 +39,13 @@ extern void js_init_fs(JSContext *ctx);
 #ifndef ENABLE_FS
 static void js_init_fs(JSContext *ctx) {}
 #endif
+// Git package
+#ifdef ENABLE_GIT
+extern void js_init_git(JSContext *ctx);
+#endif
+#ifndef ENABLE_GIT
+static void js_init_git(JSContext *ctx) {}
+#endif
 
 extern const char *history_file;
 
@@ -84,6 +91,7 @@ int main(int argc, char **argv) {
     js_init_network(ctx);
     js_init_compiler(ctx);
     js_init_fs(ctx);
+    js_init_git(ctx);
 
 
     // Init keybindings for autocomplete

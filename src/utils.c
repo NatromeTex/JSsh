@@ -420,7 +420,7 @@ static const char *js_keywords[] = {
     "true","false","null","undefined","new","class","import","export",NULL
 };
 static const char *js_objects[] = {
-    "fs", "cmp", "net", "crypt", "sys", NULL 
+    "fs", "cmp", "net", "crypt", "sys", "git", NULL 
 };
 
 static char *highlight_line(const char *line) {

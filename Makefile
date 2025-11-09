@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.5.8\"
-LDFLAGS = -lm -ldl -lreadline -lncurses -lssh
+LDFLAGS = -lm -ldl -lreadline -lncurses -lssh -lgit2
 
 # core sources
 SRC = src/main.c \
@@ -36,14 +36,22 @@ SRC += lib/fs/module.c \
 CFLAGS += -DENABLE_FS
 endif
 
+ifneq ($(findstring git,$(MODULES)),)
+SRC += lib/fs/module.c \
+       lib/fs/fs_utils.c
+CFLAGS += -DENABLE_FS
+endif
+
 ifeq "$(MODULES)" "all"
 SRC += lib/network/module.c \
        lib/network/net_utils.c \
        lib/compiler/module.c \
        lib/compiler/cmp_utils.c \
        lib/fs/module.c \
-       lib/fs/fs_utils.c
-CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS
+       lib/fs/fs_utils.c \
+       lib/git/module.c \
+       lib/git/git_utils.c
+CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS -DENABLE_GIT
 NEED_SETCAP = yes
 endif
 
