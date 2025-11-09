@@ -23,23 +23,46 @@ int certificate_check_cb(git_cert *cert, int valid, const char *host, void *payl
 
 int transfer_progress_cb(const git_indexer_progress *stats, void *payload) {
     if (stats->total_objects > 0) {
-        // Receiving objects
-        if (stats->received_objects < stats->total_objects) {
-            int percent = (100 * stats->received_objects) / stats->total_objects;
-            printf("\rReceiving objects: %d%% (%u/%u)", 
-                   percent,
-                   stats->received_objects, 
-                   stats->total_objects);
+        // Receiving objects phase
+        if (stats->received_objects <= stats->total_objects) {
+            if (stats->received_bytes > 0) {
+                double mb = stats->received_bytes / (1024.0 * 1024.0);
+                printf("\rReceiving objects: %d%% (%u/%u), %.2f MiB", 
+                       (100 * stats->received_objects) / stats->total_objects,
+                       stats->received_objects, 
+                       stats->total_objects,
+                       mb);
+            } else {
+                printf("\rReceiving objects: %d%% (%u/%u)", 
+                       (100 * stats->received_objects) / stats->total_objects,
+                       stats->received_objects, 
+                       stats->total_objects);
+            }
+            fflush(stdout);
         }
-        // Resolving deltas
-        else if (stats->total_deltas > 0 && stats->indexed_deltas < stats->total_deltas) {
-            int percent = (100 * stats->indexed_deltas) / stats->total_deltas;
+        
+        if (stats->received_objects == stats->total_objects && 
+            stats->indexed_objects == stats->total_objects) {
+            double kb = stats->received_bytes / 1024.0;
+            printf("\rReceiving objects: 100%% (%u/%u), %.2f KiB | %.2f MiB/s, done.\n",
+                   stats->total_objects,
+                   stats->total_objects,
+                   kb,
+                   kb / 1024.0);
+            fflush(stdout);
+        }
+        
+        // Resolving deltas phase
+        if (stats->total_deltas > 0) {
             printf("\rResolving deltas: %d%% (%u/%u)", 
-                   percent,
+                   (100 * stats->indexed_deltas) / stats->total_deltas,
                    stats->indexed_deltas, 
                    stats->total_deltas);
+            if (stats->indexed_deltas == stats->total_deltas) {
+                printf(", done.");
+            }
+            fflush(stdout);
         }
-        fflush(stdout);
     }
     return 0;
 }
