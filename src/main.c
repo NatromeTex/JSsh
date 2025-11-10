@@ -140,8 +140,8 @@ int main(int argc, char **argv) {
         } else {
             // Green/blue prompt for normal user
             snprintf(prompt, sizeof(prompt), 
-                    "\001\033[38;2;85;255;85m\002%s@%s\001\033[0m\002:"
-                    "\001\033[38;2;85;85;255m\002%s\001\033[0m\002$ ", 
+                    "\001\033[38;2;22;198;12m\002%s@%s\001\033[0m\002:"
+                    "\001\033[38;2;59;120;255m\002%s\001\033[0m\002$ ", 
                     username, host, cwd);
         }
 

@@ -21,6 +21,7 @@ int certificate_check_cb(git_cert *cert, int valid, const char *host, void *payl
     return 0;
 }
 
+// callbacks
 int transfer_progress_cb(const git_indexer_progress *stats, void *payload) {
     if (stats->total_objects > 0) {
         // Receiving objects phase
@@ -67,6 +68,7 @@ int transfer_progress_cb(const git_indexer_progress *stats, void *payload) {
     return 0;
 }
 
+// Change git:// to https://
 char* normalize_git_url(const char *url) {
     if (strncmp(url, "git://", 6) == 0) {
         size_t len = strlen(url) - 6 + 8 + 1;
@@ -77,6 +79,9 @@ char* normalize_git_url(const char *url) {
     return strdup(url);
 }
 
+// ---------------------------------------------------------
+
+// git.clone(url, path)
 JSValue js_git_clone(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1) {
         return JS_ThrowInternalError(ctx, "Usage: git_clone(<repo_url>, [target_dir])");
@@ -125,6 +130,55 @@ JSValue js_git_clone(JSContext *ctx, JSValueConst this_val, int argc, JSValueCon
     // Clean up
     JS_FreeCString(ctx, base_url);
     free(url);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) {
+        JS_FreeCString(ctx, path);
+    }
+    if (allocated_path) {
+        free(allocated_path);
+    }
+    
+    return result;
+}
+
+// git.init(name, path)
+JSValue js_git_init(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowInternalError(ctx, "Usage: git_init(<repo_name>, [target_dir])");
+    }
+    
+    const char *repo_name = JS_ToCString(ctx, argv[0]);
+    if (!repo_name) {
+        return JS_ThrowInternalError(ctx, "Invalid repository name");
+    }
+    
+    const char *path = NULL;
+    char *allocated_path = NULL;
+    
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) {
+        path = JS_ToCString(ctx, argv[1]);
+    } else {
+        allocated_path = strdup(repo_name);
+        path = allocated_path;
+    }
+    
+    git_libgit2_init();
+    
+    git_repository *repo = NULL;
+    int error = git_repository_init(&repo, path, 0);
+    
+    JSValue result;
+    if (error < 0) {
+        const git_error *e = git_error_last();
+        result = JS_ThrowInternalError(ctx, "Error initializing repository: %s", e && e->message ? e->message : "unknown error");
+    } else {
+        git_repository_free(repo);
+        result = JS_NewString(ctx, "Repository initialized successfully");
+    }
+    
+    git_libgit2_shutdown();
+    
+    // Clean up
+    JS_FreeCString(ctx, repo_name);
     if (argc >= 2 && !JS_IsUndefined(argv[1])) {
         JS_FreeCString(ctx, path);
     }
