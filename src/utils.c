@@ -202,7 +202,7 @@ JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             JS_FreeCString(ctx, mod);
         }
         printf("MODULES=\"%s\" make", modules);
-        snprintf(cmd, sizeof(cmd), "make clean && make MODULES=\"%s\"", modules);
+        snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\"", modules);
     }
 
     // Run make

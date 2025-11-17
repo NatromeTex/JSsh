@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fnmatch.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "../../src/utils.h"
@@ -105,6 +106,22 @@ static void find_fast(JSContext *ctx, JSValue result, const char *path, int dept
     closedir(dir);
 }
 
+// Convert bytes to human-readable unit
+static const char *units(double bytes, double *out)
+{
+    const double KiB = 1024.0;
+    const double MiB = KiB * 1024.0;
+    const double GiB = MiB * 1024.0;
+    const double TiB = GiB * 1024.0;
+
+    if (bytes >= TiB) { *out = bytes / TiB; return "TiB"; }
+    if (bytes >= GiB) { *out = bytes / GiB; return "GiB"; }
+    if (bytes >= MiB) { *out = bytes / MiB; return "MiB"; }
+
+    *out = bytes / KiB;
+    return "KiB";
+}
+
 
 
 // ---------------------------------------------------------
@@ -162,4 +179,50 @@ JSValue js_find(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     if (argc > 0) JS_FreeCString(ctx, path);
     if (namePat) JS_FreeCString(ctx, namePat);
     return result;
+}
+
+// fs.df()
+
+JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    FILE *fp = fopen("/proc/self/mounts", "r");
+    if (!fp)
+        return JS_ThrowInternalError(ctx, "Failed to open /proc/self/mounts");
+
+    printf("Filesystem           Size     Used    Avail   Use%%  Mounted on\n");
+
+    char fs[256], mountpoint[256], type[64], opts[256];
+    int dump, pass;
+
+    while (fscanf(fp, "%255s %255s %63s %255s %d %d",
+                  fs, mountpoint, type, opts, &dump, &pass) == 6)
+    {
+        struct statvfs buf;
+        if (statvfs(mountpoint, &buf) != 0)
+            continue;
+
+        unsigned long bs = buf.f_frsize;
+        double total = (double)buf.f_blocks * bs;
+        double freeb = (double)buf.f_bfree  * bs;
+        double avail = (double)buf.f_bavail * bs;
+        double used  = total - freeb;
+
+        double htotal, hused, havail;
+        const char *utotal = units(total, &htotal);
+        const char *uused  = units(used,  &hused);
+        const char *uavail = units(avail, &havail);
+
+        double pct = total > 0 ? (used / total) * 100.0 : 0.0;
+
+        printf("%-18s  %6.1f %s  %6.1f %s  %6.1f %s  %5.1f%%  %s\n",
+               fs,
+               htotal, utotal,
+               hused,  uused,
+               havail, uavail,
+               pct,
+               mountpoint);
+    }
+
+    fclose(fp);
+    return JS_NewString(ctx, "ok");
 }
