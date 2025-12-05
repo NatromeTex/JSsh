@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fnmatch.h>
+#include <stdbool.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include "quickjs.h"
@@ -13,6 +14,20 @@
 #include "../../src/utils.h"
 
 #define JS_SUPPRESS "\x1B[JSSH_SUPPRESS"
+
+// Cleanup for WSL
+#ifdef _WIN32
+#include <windows.h>
+
+static void normalize_win_mount(char *dst, const char *src) {
+    if (!GetVolumePathNameA(src, dst, 256)) {
+        // fallback: keep original
+        strncpy(dst, src, 255);
+        dst[255] = 0;
+    }
+}
+
+#endif
 
 // Print tree symbols
 static void print_indent(int depth, int is_last) {
@@ -107,8 +122,7 @@ static void find_fast(JSContext *ctx, JSValue result, const char *path, int dept
 }
 
 // Convert bytes to human-readable unit
-static const char *units(double bytes, double *out)
-{
+static const char *units(double bytes, double *out){
     const double KiB = 1024.0;
     const double MiB = KiB * 1024.0;
     const double GiB = MiB * 1024.0;
@@ -121,8 +135,6 @@ static const char *units(double bytes, double *out)
     *out = bytes / KiB;
     return "KiB";
 }
-
-
 
 // ---------------------------------------------------------
 
@@ -182,26 +194,82 @@ JSValue js_find(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
 }
 
 // fs.df()
-
-JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
+JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     FILE *fp = fopen("/proc/self/mounts", "r");
     if (!fp)
         return JS_ThrowInternalError(ctx, "Failed to open /proc/self/mounts");
 
-    printf("Filesystem           Size     Used    Avail   Use%%  Mounted on\n");
+    printf("Filesystem                Size        Used       Avail    Use%%   Mounted on\n");
 
     char fs[256], mountpoint[256], type[64], opts[256];
     int dump, pass;
 
+    //Track already-seen mountpoints after normalization 
+    char seen[256][256];
+    int seen_count = 0;
+
+    //pseudo FS types to ignore 
+    static const char *skip_fs[] = {
+        "proc", "sysfs", "tmpfs", "devtmpfs", "cgroup", "cgroup2",
+        "debugfs", "tracefs", "mqueue", "autofs", "overlay",
+        "squashfs", "ramfs", NULL
+    };
+
+    int i;
+
+    //helper: check if filesystem type is pseudo 
+    int is_pseudo_fs(const char *t) {
+        for (i = 0; skip_fs[i]; i++)
+            if (strcmp(t, skip_fs[i]) == 0)
+                return 1;
+        return 0;
+    }
+
+    //helper: dedupe mountpoints 
+    int seen_mount(const char *mp) {
+        int k;
+        for (k = 0; k < seen_count; k++)
+            if (strcmp(mp, seen[k]) == 0)
+                return 1;
+        strncpy(seen[seen_count], mp, 255);
+        seen[seen_count][255] = 0;
+        seen_count++;
+        return 0;
+    }
+
+#ifdef _WIN32
+    //Windows path normalization 
+    void normalize_win_mount(char *dst, const char *src) {
+        if (!GetVolumePathNameA(src, dst, 256)) {
+            strncpy(dst, src, 255);
+            dst[255] = 0;
+        }
+    }
+#endif
+
     while (fscanf(fp, "%255s %255s %63s %255s %d %d",
-                  fs, mountpoint, type, opts, &dump, &pass) == 6)
-    {
+                  fs, mountpoint, type, opts, &dump, &pass) == 6) {
+
+        //Skip pseudo filesystems 
+        if (is_pseudo_fs(type))
+            continue;
+
+#ifdef _WIN32
+        //Normalize synthetic Windows mounts 
+        char norm[256];
+        normalize_win_mount(norm, mountpoint);
+        strcpy(mountpoint, norm);
+#endif
+
+        //Deduplicate 
+        if (seen_mount(mountpoint))
+            continue;
+
         struct statvfs buf;
         if (statvfs(mountpoint, &buf) != 0)
             continue;
 
-        unsigned long bs = buf.f_frsize;
+        unsigned long bs = buf.f_frsize ? buf.f_frsize : buf.f_bsize;
         double total = (double)buf.f_blocks * bs;
         double freeb = (double)buf.f_bfree  * bs;
         double avail = (double)buf.f_bavail * bs;
@@ -224,5 +292,5 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     }
 
     fclose(fp);
-    return JS_NewString(ctx, "ok");
+    return JS_NewString(ctx, JS_SUPPRESS);
 }
