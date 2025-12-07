@@ -50,9 +50,8 @@ SRC += lib/network/module.c \
        lib/fs/module.c \
        lib/fs/fs_utils.c \
        lib/git/module.c \
-       lib/git/git_utils.c \
-       lib/apps/module.c \
-CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS -DENABLE_GIT -DENABLE_APPS
+       lib/git/git_utils.c
+CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS -DENABLE_GIT
 NEED_SETCAP = yes
 endif
 

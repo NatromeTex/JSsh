@@ -270,6 +270,45 @@ static JSValue js_arch(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     return JS_NewString(ctx, u.machine);
 }
 
+void js_init_apps(JSContext *ctx) {
+    const char *apps_root = "/lib/apps";
+    DIR *dir = opendir(apps_root);
+    if (!dir) {
+        perror("opendir apps_root failed");
+        return;
+    }
+
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type != DT_DIR) continue;
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s/entry.so", apps_root, ent->d_name);
+
+        if (access(path, F_OK) != 0) continue;
+
+        void *handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+        if (!handle) {
+            fprintf(stderr, "dlopen failed for %s: %s\n", path, dlerror());
+            continue;
+        }
+
+        dlerror(); // clear old errors
+        app_register_func reg = (app_register_func)dlsym(handle, "register_app");
+        const char *err = dlerror();
+        if (err != NULL) {
+            fprintf(stderr, "dlsym(register_app) failed for %s: %s\n", path, err);
+            dlclose(handle);
+            continue;
+        }
+
+        // call the app’s registration
+        reg(ctx);
+    }
+    closedir(dir);
+}
+
 // sys.username()
 static JSValue js_sys_username(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     uid_t uid = getuid();
