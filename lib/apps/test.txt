@@ -1,0 +1,6 @@
+This is a sample text that is supposed to help
+me to debug my application that has taken too long to be able to be compiled
+to this state but is not fully ready because for
+some stupid reason I have to argue with GNU Readline and ncurses to be able to 
+get the terminal working and still be sane
+hope this works

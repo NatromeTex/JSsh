@@ -1,8 +1,10 @@
 #include <ncurses.h>
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-int main() {
+int main(int argc, char **argv) {
     initscr();
     noecho();
     cbreak();
@@ -11,11 +13,26 @@ int main() {
     start_color();
     use_default_colors();
 
-    // Pair 1: white text on black background (JSVIM)
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
-
-    // Pair 2: black text on white background ("gray bar")
     init_pair(2, COLOR_BLACK, 8);
+
+    char *filebuf = NULL;
+    size_t filelen = 0;
+
+    if (argc > 1) {
+        FILE *fp = fopen(argv[1], "r");
+        if (fp) {
+            fseek(fp, 0, SEEK_END);
+            filelen = ftell(fp);
+            fseek(fp, 0, SEEK_SET);
+            filebuf = malloc(filelen + 1);
+            if (filebuf) {
+                fread(filebuf, 1, filelen, fp);
+                filebuf[filelen] = '\0';
+            }
+            fclose(fp);
+        }
+    }
 
     int ch;
     int maxy, maxx;
@@ -26,32 +43,43 @@ int main() {
         getmaxyx(stdscr, maxy, maxx);
         clear();
 
-        // Border
         box(stdscr, 0, 0);
 
-        // Draw JSVIM at (0,2)
         attron(COLOR_PAIR(1));
         mvprintw(0, 2, "%s", title);
         attroff(COLOR_PAIR(1));
 
-        // Bottom "gray" bar (full-width)
+        if (filebuf) {
+            int row = 1;
+            int col = 1;
+            const char *p = filebuf;
+
+            while (*p && row < maxy - 1) {
+                if (*p == '\n') {
+                    row++;
+                    col = 1;
+                } else {
+                    if (col < maxx - 1)
+                        mvaddch(row, col++, *p);
+                }
+                p++;
+            }
+        }
+
         attron(COLOR_PAIR(2));
         for (int i = 1; i < maxx - 1; i++)
             mvaddch(maxy - 1, i, ' ');
         attroff(COLOR_PAIR(2));
 
-        // Format current time (HH:MM)
         time_t now = time(NULL);
         struct tm *tm_info = localtime(&now);
         char tbuf[6];
         strftime(tbuf, sizeof(tbuf), "%H:%M", tm_info);
 
-        // Print time right-aligned: last column - 2
         attron(COLOR_PAIR(2));
         mvprintw(maxy - 1, maxx - 1 - (int)strlen(tbuf) - 1, "%s", tbuf);
         attroff(COLOR_PAIR(2));
 
-        // Keep cursor within the border
         if (cy < 1) cy = 1;
         if (cy > maxy - 2) cy = maxy - 2;
         if (cx < 1) cx = 1;
@@ -61,7 +89,7 @@ int main() {
         refresh();
 
         ch = getch();
-        if (ch == 27) break; // ESC exits
+        if (ch == 27) break;
 
         switch (ch) {
             case KEY_UP:    cy--; break;
@@ -69,10 +97,11 @@ int main() {
             case KEY_LEFT:  cx--; break;
             case KEY_RIGHT: cx++; break;
             case KEY_RESIZE:
-                // Loop redraws everything automatically
                 break;
         }
     }
+
+    if (filebuf) free(filebuf);
 
     endwin();
     return 0;
