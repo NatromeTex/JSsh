@@ -15,11 +15,13 @@ int main(int argc, char **argv) {
     set_escdelay(100);
 
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
-    init_pair(2, COLOR_BLACK, 8);   // status bar
-    init_pair(3, 8, COLOR_BLACK);   // gutter
+    init_pair(2, COLOR_BLACK, 8);   //status
+    init_pair(3, 8, COLOR_BLACK);   //gutter
 
     char *filebuf = NULL;
     size_t filelen = 0;
+
+    const char *filename = (argc > 1 ? argv[1] : "");
 
     if (argc > 1) {
         FILE *fp = fopen(argv[1], "r");
@@ -36,9 +38,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    const char *filename = (argc > 1 ? argv[1] : "");
-
-    // Count lines
+    // Count logical lines
     size_t line_count = 1;
     if (filebuf) {
         for (size_t i = 0; i < filelen; i++)
@@ -53,14 +53,16 @@ int main(int argc, char **argv) {
 
     int ch;
     int maxy, maxx;
-    int cy = 1, cx = gutter_width + 2; // cursor starts after gutter
     const char *title = "JSVIM";
+
+    int cy = 1;
+    int cx = gutter_width + 2;
 
     while (1) {
         getmaxyx(stdscr, maxy, maxx);
         erase();
 
-        // Draw full box, then remove left border
+        // Draw box, remove left border
         box(stdscr, 0, 0);
         mvaddch(0, 0, ' ');
         for (int i = 1; i < maxy - 1; i++)
@@ -71,47 +73,68 @@ int main(int argc, char **argv) {
         mvprintw(0, 2, "%s", title);
         attroff(COLOR_PAIR(1));
 
-        // Render file with fixed gutter
+        // Render file with wrap-aware line numbers
         if (filebuf) {
-            int row = 1;
             const char *p = filebuf;
             size_t lineno = 1;
 
+            int row = 1;
             int col_offset = gutter_width + 2;
 
             while (*p && row < maxy - 1) {
 
-                // line numbers (gray)
+                // Start of a logical line → print its number
                 attron(COLOR_PAIR(3));
                 mvprintw(row, 1, "%*zu", gutter_width, lineno);
                 attroff(COLOR_PAIR(3));
 
                 int col = col_offset;
 
-                while (*p && *p != '\n' && col < maxx - 1) {
+                // Render logical line until newline OR screen row ends
+                while (*p && *p != '\n') {
+
+                    if (col >= maxx - 1) {
+                        // Hard wrap → next screen row without incrementing lineno
+                        row++;
+                        if (row >= maxy - 1)
+                            break;
+
+                        // Wrapped row → blank gutter
+                        attron(COLOR_PAIR(3));
+                        mvprintw(row, 1, "%*s", gutter_width, "");
+                        attroff(COLOR_PAIR(3));
+
+                        col = col_offset;
+                    }
+
+                    if (row >= maxy - 1)
+                        break;
+
                     mvaddch(row, col++, *p++);
                 }
 
-                if (*p == '\n')
+                // If newline, consume it and increment logical line number
+                if (*p == '\n') {
                     p++;
+                    lineno++;
+                }
 
-                lineno++;
                 row++;
             }
         }
 
-        // Status bar
+        // Status bar background
         attron(COLOR_PAIR(2));
         for (int i = 1; i < maxx - 1; i++)
             mvaddch(maxy - 1, i, ' ');
         attroff(COLOR_PAIR(2));
 
-        // Filename
+        //Filename
         attron(COLOR_PAIR(2));
         mvprintw(maxy - 1, 2, "%s", filename);
         attroff(COLOR_PAIR(2));
 
-        // Clock
+        //Time
         time_t now = time(NULL);
         struct tm *tm_info = localtime(&now);
         char tbuf[6];
@@ -121,7 +144,7 @@ int main(int argc, char **argv) {
         mvprintw(maxy - 1, maxx - 1 - (int)strlen(tbuf) - 1, "%s", tbuf);
         attroff(COLOR_PAIR(2));
 
-        // Cursor boundary enforcement
+        // Keep cursor outside gutter
         int col_offset = gutter_width + 2;
 
         if (cy < 1) cy = 1;
