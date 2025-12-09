@@ -625,9 +625,50 @@ fs.find("./lib", { name: "*.c", type: "f", depth: 2})
 // ./compiler/cmp_utils.c,./compiler/module.c,./fs/fs_utils.c,./fs/module.c,./network/module.c,./network/net_utils.c
 ```
 
+<br>
+
+# Applications
+
+JSSH ships with a few applications which are standalone and install directly to `usr/local/bin` and are available in bash and JSSH. These apps are the next step in JSSH development.
+
 ---
+## `apps.jsvim("path")`
 
+* **Description**: Text editor for JSSH, uses intuitive controls rather than vim-style controls. Use to open, read, edit and save code and text files.
+* **Parameters**:
 
+  * `path` (string | optional): Path to file to be edited.
+
+* **Example**:
+
+``` js
+apps.jsvim("Makefile")
+//opens the editor window from JSSH
+```
+
+Also works with bash
+```bash
+#!/bin/bash
+jsvim ./test.c
+# opens the editor window from bash
+```
+
+* **Controls**:
+
+  * Cursor Movement: JSVIM uses arrow keys (Up ↑, Down ↓, Left ←, Right →) for cursor movement
+  * Modes: JSVIM starts in `INSERT` mode by default, the `ESC` key switches between the `INSERT` and `COMMAND` modes.
+  * INSERT mode: Allows for text to be edited within the editing window.
+  * COMMAND mode: Allows you to enter commands, your cursor is locked to the `COMMAND` window. The `COMMAND` mode auto-inserts a ':' at the start because all commands start with a ':' so it is redundant to type :).
+
+* **Commands**:
+
+  | Commands      | What it does                                         |
+  |     :---:     |       :---:                                          |
+  | :q            | Quits the application without saving buffer          |
+  | :w            | Writes the modified buffer to the file               |
+  | :wq           | Writes the modified buffer and quits the application |
+
+<br>
 
 ### Notes
 * No shell invocation occurs for these commands (`system()` is only used internally in `update()` and `sys.sudo()` for convenience).

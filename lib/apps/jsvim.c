@@ -91,6 +91,31 @@ static int save_file(Buffer *b, const char *fname) {
 }
 
 int main(int argc, char **argv) {
+    
+    Buffer buf;
+    buf_init(&buf);
+    
+    char filename[1024] = "";
+    int have_filename = 0;
+    int existing_file = 0;
+    if (argc > 1) {
+        if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {  //Print version
+            printf("JSVIM - A Text Editor for JSSH %s\n", JSVIM_VERSION);
+            printf("Packaged with JSSH %s\n", JSSH_VERSION);
+            return 0;
+        }
+        else{
+            strncpy(filename, argv[1], sizeof(filename)-1); //load filename from arg
+            have_filename = 1;
+            existing_file = !load_file(&buf, filename);
+        }
+    } else {
+        // start with an empty buffer
+        buf_push(&buf, dupstr(""));
+    }
+
+    //We will init the screen after the args have been processed because ncurses messes with stdout
+    //Guess how I found that out...
     initscr();
     noecho();
     cbreak();
@@ -104,21 +129,6 @@ int main(int argc, char **argv) {
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_BLACK, 248);   // status bar 
     init_pair(3, 8, COLOR_BLACK);     // gutter (gray on black) 
-
-    Buffer buf;
-    buf_init(&buf);
-
-    char filename[1024] = "";
-    int have_filename = 0;
-    int existing_file = 0;
-    if (argc > 1) {
-        strncpy(filename, argv[1], sizeof(filename)-1);
-        have_filename = 1;
-        existing_file = !load_file(&buf, filename);
-    } else {
-        // start with an empty buffer
-        buf_push(&buf, dupstr(""));
-    }
 
     // if no filename at startup, prompt user before main loop
     int maxy, maxx;
@@ -392,16 +402,14 @@ int main(int argc, char **argv) {
                     }
                     break;
                 case KEY_DOWN:
-                    if (cursor_line + 1 < buf.count) {
-                        cursor_line++;
-                        size_t len = strlen(buf.lines[cursor_line]);
-                        if (cursor_col > len) cursor_col = len;
-                        if (cursor_line >= scroll_y + visible_rows) {
-                            if (cursor_line >= visible_rows)
-                                scroll_y = cursor_line - (visible_rows - 1);
-                            else
-                                scroll_y = 0;
-                        }
+                    cursor_line++;
+                    size_t len = strlen(buf.lines[cursor_line]);
+                    if (cursor_col > len) cursor_col = len;
+                    if (cursor_line >= scroll_y + visible_rows) {
+                        if (cursor_line >= visible_rows)
+                            scroll_y = cursor_line - (visible_rows);
+                        else
+                            scroll_y = 0;
                     }
                     break;
                 case KEY_LEFT:

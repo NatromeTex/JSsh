@@ -187,32 +187,49 @@ JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     char cmd[2048];
 
     if (argc == 0) {
-        // No modules, just build core
         snprintf(cmd, sizeof(cmd), "make clean && make");
     } else {
-        // Build MODULES string
         char modules[1024];
         modules[0] = '\0';
 
+        int do_install = 0;
+
         for (int i = 0; i < argc; i++) {
-            const char *mod = JS_ToCString(ctx, argv[i]);
-            if (!mod) continue;
-            if (i > 0) strcat(modules, " ");
-            strcat(modules, mod);
-            JS_FreeCString(ctx, mod);
+            const char *arg = JS_ToCString(ctx, argv[i]);
+            if (!arg) continue;
+
+            if (strcmp(arg, "install") == 0) {
+                do_install = 1;
+                JS_FreeCString(ctx, arg);
+                continue;
+            }
+
+            if (modules[0] != '\0')
+                strcat(modules, " ");
+
+            strcat(modules, arg);
+            JS_FreeCString(ctx, arg);
         }
-        printf("MODULES=\"%s\" make", modules);
-        snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\"", modules);
+
+        if (do_install) {
+            // install mode
+            if (modules[0] == '\0')
+                snprintf(cmd, sizeof(cmd), "make install");
+            else
+                snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\" install", modules);
+
+        } else {
+            // normal mode
+            snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\"", modules);
+        }
     }
 
-    // Run make
     int ret = system(cmd);
     if (ret != 0) {
         fprintf(stderr, "update: make failed\n");
         return JS_UNDEFINED;
     }
 
-    // Replace current process with the newly built binary
     char *argv0 = "./bin/jssh";
     char *args[] = { argv0, NULL };
     execv(argv0, args);

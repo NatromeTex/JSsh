@@ -1,8 +1,8 @@
 // lib/apps/module.c
 #include "quickjs.h"
-#include "editor.h"
+#include "app_utils.h"
 
-void js_init_apps(JSContext *ctx) {
+void js_init_app(JSContext *ctx) {
   JSValue global_obj = JS_GetGlobalObject(ctx);
   JSValue apps = JS_NewObject(ctx);
 

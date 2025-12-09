@@ -1,9 +1,3 @@
-/* This file contains code for implementing the prototypes in func.h
-*  You can add your own native functions to work through JS from here
-*  This file is used mostly to support native Unix primitive commands 
-*   as a stepping stone for pure JS commands
-*/
-
 #include <grp.h>
 #include <pwd.h>
 #include <time.h>
@@ -23,8 +17,7 @@
 #define JS_SUPPRESS "\x1B[JSSH_SUPPRESS" 
 
 // cat
-JSValue js_cat(JSContext *ctx, JSValueConst this_val,
-               int argc, JSValueConst *argv) {
+JSValue js_cat(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
 
     const char *path;
     if (argc < 1)

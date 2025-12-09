@@ -46,6 +46,13 @@ extern void js_init_git(JSContext *ctx);
 #ifndef ENABLE_GIT
 static void js_init_git(JSContext *ctx) {}
 #endif
+// Apps package
+#ifdef ENABLE_APPS
+extern void js_init_app(JSContext *ctx);
+#endif
+#ifndef ENABLE_APPS
+static void js_init_app(JSContext *ctx) {}
+#endif
 
 extern const char *history_file;
 
@@ -92,6 +99,7 @@ int main(int argc, char **argv) {
     js_init_compiler(ctx);
     js_init_fs(ctx);
     js_init_git(ctx);
+    js_init_app(ctx);
 
 
     // Init keybindings for autocomplete
