@@ -2,31 +2,103 @@
 #include <ncurses.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define INITIAL_CAP 128
+
+#ifndef JSVIM_VERSION
+#define JSVIM_VERSION "0.1.0"
+#endif
+#ifndef JSSH_VERSION
+#define JSSH_VERSION "unknown"
+#endif
+
+// File Types
+typedef enum {
+    FT_NONE = 0,
+    FT_C,
+    FT_CPP,
+} FileType;
+
+// LSP handles
+struct LSPProcess {
+    pid_t pid;
+    int stdin_fd; //send to lsp
+    int stdout_fd; //read from lsp
+    char *lsp_accum;
+    size_t lsp_accum_len;
+};
 
 // Simple dynamic array of lines
 typedef struct {
     char **lines;
     size_t count;
     size_t cap;
+    FileType ft;
+    struct LSPProcess lsp;
 } Buffer;
 
+
 static void buf_init(Buffer *b) {
+    // Initialize line storage
     b->cap = 16;
     b->count = 0;
     b->lines = malloc(sizeof(char*) * b->cap);
+
+    // Filetype not known yet
+    b->ft = FT_NONE;
+
+    // Initialize LSP state
+    b->lsp.pid = 0;
+    b->lsp.stdin_fd = -1;
+    b->lsp.stdout_fd = -1;
+    b->lsp.lsp_accum = NULL;
+    b->lsp.lsp_accum_len = 0;
 }
 
+
 static void buf_free(Buffer *b) {
-    for (size_t i = 0; i < b->count; i++) free(b->lines[i]);
+    //Free text lines
+    for (size_t i = 0; i < b->count; i++) {
+        free(b->lines[i]);
+    }
     free(b->lines);
     b->lines = NULL;
-    b->count = b->cap = 0;
+    b->count = 0;
+    b->cap = 0;
+
+    //Shut down LSP process if active
+    if (b->lsp.pid > 0) {
+        // Kill clangd process
+        kill(b->lsp.pid, SIGTERM);
+
+        // Reap it (avoids zombies)
+        waitpid(b->lsp.pid, NULL, 0);
+    }
+
+    //Close FD handles if open
+    if (b->lsp.stdin_fd  != -1) close(b->lsp.stdin_fd);
+    if (b->lsp.stdout_fd != -1) close(b->lsp.stdout_fd);
+
+    b->lsp.stdin_fd  = -1;
+    b->lsp.stdout_fd = -1;
+    b->lsp.pid       = 0;
+
+    //Free LSP accumulation buffer
+    if (b->lsp.lsp_accum) {
+        free(b->lsp.lsp_accum);
+        b->lsp.lsp_accum = NULL;
+    }
+    b->lsp.lsp_accum_len = 0;
 }
+
 
 static void buf_ensure(Buffer *b, size_t need) {
     if (need <= b->cap) return;
@@ -89,6 +161,210 @@ static int save_file(Buffer *b, const char *fname) {
     fclose(fp);
     return 0;
 }
+
+// Append data to LSP process accumulation buffer
+static void lsp_append_data(struct LSPProcess *p, const char *data, size_t n) {
+    p->lsp_accum = realloc(p->lsp_accum, p->lsp_accum_len + n);
+    memcpy(p->lsp_accum + p->lsp_accum_len, data, n);
+    p->lsp_accum_len += n;
+}
+
+// Handle a complete LSP JSON message (stub)
+static int try_parse_lsp_message(struct LSPProcess *p) {
+    char *buf = p->lsp_accum;
+    size_t len = p->lsp_accum_len;
+
+    if (len < 4) {
+        return 0; // not enough data for even "\r\n\r\n"
+    }
+
+    // Find header terminator: "\r\n\r\n"
+    char *header_end = NULL;
+    for (size_t i = 0; i + 3 < len; i++) {
+        if (buf[i] == '\r' && buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n') {
+            header_end = buf + i + 4; // start of JSON payload
+            break;
+        }
+    }
+
+    if (!header_end) {
+        return 0; // incomplete header
+    }
+
+    // HEADER PARSING
+    size_t header_len = header_end - buf;
+    size_t content_length = 0;
+
+    // Safely isolate the header for parsing
+    // (temporarily NUL-terminate; we restore it afterward)
+    char saved = buf[header_len];
+    buf[header_len] = '\0';
+
+    // Find the "Content-Length:" field strictly inside the header
+    const char *needle = "Content-Length:";
+    char *cl = strstr(buf, needle);
+
+    if (!cl || cl > (char *)(&buf[header_len - strlen(needle)])) {
+        buf[header_len] = saved;
+        return -1; // malformed header
+    }
+
+    // Move pointer past "Content-Length:"
+    cl += strlen(needle);
+
+    // Skip whitespace
+    while (*cl == ' ' || *cl == '\t') cl++;
+
+    // Parse length
+    content_length = strtoul(cl, NULL, 10);
+
+    // Restore buffer
+    buf[header_len] = saved;
+
+    // TOTAL SIZE CHECK
+    size_t total_needed = header_len + content_length;
+
+    if (len < total_needed) {
+        return 0; // incomplete message
+    }
+
+    // complete message available
+    char *json = malloc(content_length + 1);
+    if (!json) {
+        return -1; // allocation failure
+    }
+
+    memcpy(json, header_end, content_length);
+    json[content_length] = '\0';
+
+    // Handle the finished JSON message
+    handle_lsp_json_message(json);
+    free(json);
+
+    // REMOVE THE PROCESSED MESSAGE FROM THE BUFFER
+    size_t remaining = len - total_needed;
+
+    if (remaining > 0) {
+        memmove(buf, buf + total_needed, remaining);
+    }
+
+    p->lsp_accum_len = remaining;
+
+    // Shrink to exact size (if zero, free fully)
+    if (remaining == 0) {
+        free(p->lsp_accum);
+        p->lsp_accum = NULL;
+    } else {
+        char *newbuf = realloc(p->lsp_accum, remaining);
+        if (newbuf) {
+            p->lsp_accum = newbuf;
+        }
+        // If realloc fails, we keep the old buffer; safe because length is unchanged
+    }
+
+    return 1; // message processed
+}
+
+
+
+
+struct LSPProcess spawn_lsp(void) {
+    struct LSPProcess proc = {0};
+
+    int in_pipe[2];   // parent writes → child reads (stdin)
+    int out_pipe[2];  // child writes → parent reads (stdout)
+
+    if (pipe(in_pipe) < 0) {
+        perror("pipe in_pipe");
+        return proc;
+    }
+
+    if (pipe(out_pipe) < 0) {
+        perror("pipe out_pipe");
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        return proc;
+    }
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        return proc;
+    }
+
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+
+        setpgid(0, 0);
+        // testing with clangd, will later allow more options
+        execlp("clangd", "clangd", NULL);
+        perror("execlp clangd");
+        _exit(1);
+    }
+
+    // Close ends not used by jsvim
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    // Set stdout_fd non-blocking
+    int flags = fcntl(out_pipe[0], F_GETFL, 0);
+    fcntl(out_pipe[0], F_SETFL, flags | O_NONBLOCK);
+
+    proc.pid = pid;
+    proc.stdin_fd = in_pipe[1];
+    proc.stdout_fd = out_pipe[0];
+
+    return proc;
+}
+
+void stop_lsp(struct LSPProcess *p) {
+    if (p->pid > 0) {
+        kill(p->pid, SIGTERM);
+        waitpid(p->pid, NULL, 0);
+    }
+    if (p->stdin_fd > 0) close(p->stdin_fd);
+    if (p->stdout_fd > 0) close(p->stdout_fd);
+}
+
+static const char *get_file_ext(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if (!dot || dot == filename)
+        return NULL;
+    return dot + 1;
+}
+
+static FileType detect_filetype(const char *filename) {
+    const char *ext = get_file_ext(filename);
+    if (!ext) return FT_NONE;
+
+    if (strcmp(ext, "c") == 0)
+        return FT_C;
+
+    if (strcmp(ext, "h") == 0)
+        return FT_C;
+
+    if (strcmp(ext, "cpp") == 0 || strcmp(ext, "cc") == 0 || strcmp(ext, "cxx") == 0)
+        return FT_CPP;
+
+    if (strcmp(ext, "hpp") == 0)
+        return FT_CPP;
+
+    return FT_NONE;
+}
+
 
 int main(int argc, char **argv) {
     
@@ -164,6 +440,15 @@ int main(int argc, char **argv) {
         } else {
             // leave unnamed; user can :w with filename later
         }
+    }
+    buf.ft = detect_filetype(filename);
+
+    if (buf.ft == FT_C || buf.ft == FT_CPP) {
+        buf.lsp = spawn_lsp();
+    }
+    if (buf.lsp.pid <= 0) {
+        mvprintw(maxy - 1, 0, "Warning: failed to start clangd LSP server");
+        getch();
     }
 
     // Create two windows: main window (includes status bar) and command window
@@ -658,11 +943,26 @@ int main(int argc, char **argv) {
                 // ignore in command mode
             }
         }
+        if (buf.lsp.stdout_fd != -1) {
+            char temp[4096];
+            ssize_t n = read(buf.lsp.stdout_fd, temp, sizeof(temp));
+            if (n > 0) {
+                lsp_append_data(&buf.lsp, temp, (size_t)n);
+
+                int r;
+                while ((r = try_parse_lsp_message(&buf.lsp)) == 1) {
+                    // keep parsing messages
+                }
+
+                // if r == -1: malformed LSP message (can safely ignore)
+            }   
+        }
     } // main loop
 
     // cleanup
     if (main_win) delwin(main_win);
     if (cmd_win) delwin(cmd_win);
+    stop_lsp(&buf.lsp);
     buf_free(&buf);
     endwin();
 
