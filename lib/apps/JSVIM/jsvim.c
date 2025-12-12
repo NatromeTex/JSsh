@@ -11,8 +11,10 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include "cJSON.h"
+#include "semantic.h"
 
 #define INITIAL_CAP 128
+#define MAX_LSP_TOKEN_TYPES 64
 
 #ifndef JSVIM_VERSION
 #define JSVIM_VERSION "0.1.0"
@@ -20,6 +22,20 @@
 #ifndef JSSH_VERSION
 #define JSSH_VERSION "unknown"
 #endif
+
+/* When I was in college, our first UNIX Class had us coding in bash, awk and all those god-awful
+*  Scripting languages. One thing was common in all those scripts though, vi, the simple text editor
+*  That runs in the terminal with such unintuitive controls I swear to god Tax codes are more clearer
+*  on the matter. While I am sure you can rebind the controls but First impressions last...
+*/
+
+//Syntax colors
+#define SY_KEYWORD  10
+#define SY_TYPE     11
+#define SY_FUNCTION 12
+#define SY_STRING   13
+#define SY_NUMBER   14
+#define SY_COMMENT  15
 
 // File Types
 typedef enum {
@@ -64,6 +80,14 @@ typedef struct {
     int lsp_dirty;          // buffer changed since last sync
     char lsp_uri[4096];     // URI used in LSP textDocument
     char filepath[1024];    // filename as opened in jsvim
+
+    //Syntax highlighting
+    SemanticToken *tokens;
+    size_t token_count;
+    size_t token_cap;
+
+    SemanticKind lsp_token_map[MAX_LSP_TOKEN_TYPES];
+    size_t lsp_token_map_len;
 } Buffer;
 
 // Forward declarations for helpers used before their definitions
@@ -159,7 +183,17 @@ static void lsp_initialize(Buffer *buf) {
             "\"params\":{"\
                 "\"processId\":%d,"\
                 "\"rootUri\":null,"\
-                "\"capabilities\":{}"\
+                "\"capabilities\":{" \
+                    "\"textDocument\":{"
+                        "\"semanticTokens\":{"
+                            "\"requests\":{"
+                                "\"full\":true"
+                            "},"\
+                            "\"tokenTypes\":[],"
+                            "\"tokenModifiers\":[]"
+                        "}"
+                    "}"
+                "}"\
             "}"\
         "}",
         getpid()
@@ -230,6 +264,68 @@ static void lsp_notify_did_change(Buffer *buf) {
     buf->lsp_dirty = 0;
 }
 
+// Request semantic tokens from LSP server
+static void lsp_request_semantic_tokens(Buffer *buf)
+{
+    if (!buf) return;
+    if (buf->lsp.stdin_fd == -1) return;
+    if (!buf->lsp_opened) return;
+    if (buf->lsp_uri[0] == '\0') return;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return;
+
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+
+    // Use a fixed ID for now
+    cJSON_AddNumberToObject(root, "id", 100);
+
+    cJSON_AddStringToObject(
+        root,
+        "method",
+        "textDocument/semanticTokens/full"
+    );
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "params", params);
+
+    cJSON *td = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "textDocument", td);
+
+    cJSON_AddStringToObject(td, "uri", buf->lsp_uri);
+
+    char *json = cJSON_PrintUnformatted(root);
+    if (json) {
+        lsp_send(&buf->lsp, json);
+        free(json);
+    }
+
+    cJSON_Delete(root);
+}
+
+// Semantic functions that should've been in semantic.c but the definition of buffer are playing ring around the rosie
+void semantic_tokens_clear(Buffer *buf) {
+    if (!buf) return;
+    buf->token_count = 0;
+}
+
+void semantic_token_push(Buffer *buf, const SemanticToken *tok){
+    if (!buf || !tok) return;
+
+    if (buf->token_count == buf->token_cap) {
+        size_t new_cap = buf->token_cap ? buf->token_cap * 2 : 64;
+        SemanticToken *new_tokens =
+            realloc(buf->tokens, new_cap * sizeof(SemanticToken));
+        if (!new_tokens) return;
+
+        buf->tokens = new_tokens;
+        buf->token_cap = new_cap;
+    }
+
+    buf->tokens[buf->token_count++] = *tok;
+}
+
+
 // Clear all diagnostics from buffer
 static void buf_clear_diagnostics(Buffer *buf) {
     for (size_t i = 0; i < buf->diag_count; i++) {
@@ -280,6 +376,13 @@ static void buf_init(Buffer *b) {
     b->lsp_uri[0] = '\0';
     b->filepath[0] = '\0';
 
+    // Initialize semantic tokens
+    b->tokens = NULL;
+    b->token_count = 0;
+    b->token_cap = 0;
+
+    // Initialize LSP token map
+    b->lsp_token_map_len = 0;
 }
 
 
@@ -323,6 +426,11 @@ static void buf_free(Buffer *b) {
     }
     free(b->diagnostics);
 
+    //Free semantic tokens
+    free(b->tokens);
+    b->tokens = NULL;
+    b->token_count = 0;
+    b->token_cap = 0;
 }
 
 
@@ -388,6 +496,43 @@ static int save_file(Buffer *b, const char *fname) {
     return 0;
 }
 
+// Map LSP token type string to SemanticKind
+static int color_for_semantic_kind(SemanticKind kind)
+{
+    switch (kind) {
+        case SEM_KEYWORD:   return SY_KEYWORD;
+        case SEM_TYPE:      return SY_TYPE;
+        case SEM_CLASS:     return SY_TYPE;
+        case SEM_STRUCT:    return SY_TYPE;
+        case SEM_ENUM:      return SY_TYPE;
+        case SEM_NAMESPACE: return SY_TYPE;
+        case SEM_FUNCTION:  return SY_FUNCTION;
+        case SEM_VARIABLE:  return SY_KEYWORD;   // Use keyword color for variables
+        case SEM_PARAMETER: return SY_KEYWORD;   // Use keyword color for parameters
+        case SEM_PROPERTY:  return SY_FUNCTION;  // Use function color for properties
+        case SEM_MACRO:     return SY_FUNCTION;  // Macros in function color
+        case SEM_STRING:    return SY_STRING;
+        case SEM_NUMBER:    return SY_NUMBER;
+        case SEM_COMMENT:   return SY_COMMENT;
+        case SEM_OPERATOR:  return 0;            // No special color for operators
+        default:            return 0;
+    }
+}
+
+// Get SemanticKind at given line/column
+static SemanticKind semantic_kind_at(Buffer *buf, int line, int col)
+{
+    for (size_t i = 0; i < buf->token_count; i++) {
+        SemanticToken *t = &buf->tokens[i];
+        if (t->line != line)
+            continue;
+
+        if (col >= t->col && col < t->col + t->len)
+            return t->kind;
+    }
+    return SEM_NONE;
+}
+
 // Append data to LSP process accumulation buffer
 static void lsp_append_data(struct LSPProcess *p, const char *data, size_t n) {
     p->lsp_accum = realloc(p->lsp_accum, p->lsp_accum_len + n);
@@ -428,7 +573,33 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
             // initialize response (LSP spec)
             cJSON *result = cJSON_GetObjectItem(root, "result");
             if (result) {
-                // Send "initialized"
+                cJSON *caps = cJSON_GetObjectItem(result, "capabilities");
+                if (caps) {
+                    cJSON *stp = cJSON_GetObjectItem(caps, "semanticTokensProvider");
+                    if (stp) {
+                        cJSON *legend = cJSON_GetObjectItem(stp, "legend");
+                        if (legend) {
+                            cJSON *tokenTypes = cJSON_GetObjectItem(legend, "tokenTypes");
+                            if (cJSON_IsArray(tokenTypes)) {
+                                int count = cJSON_GetArraySize(tokenTypes);
+                                if (count > MAX_LSP_TOKEN_TYPES)
+                                    count = MAX_LSP_TOKEN_TYPES;
+
+                                for (int i = 0; i < count; i++) {
+                                    cJSON *item = cJSON_GetArrayItem(tokenTypes, i);
+                                    if (item && cJSON_IsString(item)) {
+                                        buf->lsp_token_map[i] =
+                                            semantic_kind_from_lsp(item->valuestring);
+                                    } else {
+                                        buf->lsp_token_map[i] = SEM_NONE;
+                                    }
+                                }
+                                buf->lsp_token_map_len = (size_t)count;
+                            }
+                        }
+                    }
+                }
+
                 lsp_send(&buf->lsp,
                     "{"
                         "\"jsonrpc\":\"2.0\","
@@ -439,10 +610,54 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
 
                 // Send didOpen now that connection is established.
                 lsp_notify_did_open(buf);
+                lsp_request_semantic_tokens(buf);
+            }
+        } else if (msg_id == 100) {
+            cJSON *result = cJSON_GetObjectItem(root, "result");
+            cJSON *data   = cJSON_GetObjectItem(result, "data");
+            if (!cJSON_IsArray(data)) {
+                cJSON_Delete(root);
+                return;
+            }
+        
+            semantic_tokens_clear(buf);
+        
+            int line = 0;
+            int col  = 0;
+            int n = cJSON_GetArraySize(data);
+        
+            for (int i = 0; i + 5 <= n; i += 5) {
+                cJSON *dL = cJSON_GetArrayItem(data, i);
+                cJSON *dS = cJSON_GetArrayItem(data, i + 1);
+                cJSON *dLen = cJSON_GetArrayItem(data, i + 2);
+                cJSON *dType = cJSON_GetArrayItem(data, i + 3);
+                cJSON *dMod = cJSON_GetArrayItem(data, i + 4);
+                
+                if (!dL || !dS || !dLen || !dType || !dMod) continue;
+                
+                int deltaLine  = dL->valueint;
+                int deltaStart = dS->valueint;
+                int length     = dLen->valueint;
+                int type_index = dType->valueint;
+                int modifiers  = dMod->valueint;
+            
+                line += deltaLine;
+                col = (deltaLine == 0) ? col + deltaStart : deltaStart;
+            
+                SemanticToken token;
+                token.line = line;
+                token.col  = col;
+                token.len  = length;
+                token.modifiers = modifiers;
+            
+                SemanticKind kind = SEM_NONE;
+                if (type_index >= 0 && (size_t)type_index < buf->lsp_token_map_len)
+                    kind = buf->lsp_token_map[type_index];
+                token.kind = kind;
+            
+                semantic_token_push(buf, &token);
             }
         }
-
-        // Other response IDs would go here later (hover, completion, etc.)
 
         cJSON_Delete(root);
         return;
@@ -492,21 +707,7 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
 
                 cJSON *sev = cJSON_GetObjectItem(diag, "severity");
                 int severity = (sev && cJSON_IsNumber(sev)) ? sev->valueint : 3;
-                {
-                    FILE *df = fopen("diag.log", "a");
-                    if (df) {
-                        fprintf(df,
-                            "DIAGNOSTIC:\n"
-                            "  line: %d\n"
-                            "  col: %d\n"
-                            "  severity: %d\n"
-                            "  message: %s\n"
-                            "----------------------------------------\n",
-                            l, c, severity, t
-                        );
-                        fclose(df);
-                    }
-                }
+
                 if (severity > 2)
                     continue;
 
@@ -785,11 +986,16 @@ int main(int argc, char **argv) {
     timeout(200); // update screen
 
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
-    init_pair(2, COLOR_BLACK, 248);   // status bar 
-    init_pair(3, 8, COLOR_BLACK);     // gutter (gray on black)
-    init_pair(4, 196, COLOR_BLACK); // errors
-    init_pair(5, 226, COLOR_BLACK); // warnings
-
+    init_pair(2, COLOR_BLACK, 248);                      // status bar 
+    init_pair(3, 8, COLOR_BLACK);                        // gutter (gray on black)
+    init_pair(4, 196, COLOR_BLACK);                      // errors
+    init_pair(5, 226, COLOR_BLACK);                      // warnings
+    init_pair(SY_KEYWORD,  COLOR_BLUE,    COLOR_BLACK);  // keywords 
+    init_pair(SY_TYPE,     COLOR_CYAN,    COLOR_BLACK);  // types
+    init_pair(SY_FUNCTION, COLOR_YELLOW,  COLOR_BLACK);  // functions
+    init_pair(SY_STRING,   127,   COLOR_BLACK);          // strings
+    init_pair(SY_NUMBER,   127, COLOR_BLACK);            // numbers
+    init_pair(SY_COMMENT,  34,   COLOR_BLACK);           // comments
     // if no filename at startup, prompt user before main loop
     int maxy, maxx;
     getmaxyx(stdscr, maxy, maxx);
@@ -952,7 +1158,13 @@ int main(int argc, char **argv) {
                     }
                 }
                 if (row >= maxy - 2) break;
+                SemanticKind sk = semantic_kind_at(&buf, (int)lineno, (int)ip);
+                int sy = color_for_semantic_kind(sk);
+                if (sy)
+                    wattron(main_win, COLOR_PAIR(sy));
                 mvwaddch(main_win, row, col++, p[ip++]);
+                if (sy)
+                    wattroff(main_win, COLOR_PAIR(sy));
             }
             row++;
         }
@@ -1222,6 +1434,7 @@ int main(int argc, char **argv) {
                 // If the buffer changed and LSP is active, send didChange.
                 if (buf.lsp_dirty && (buf.ft == FT_C || buf.ft == FT_CPP) && buf.lsp.pid > 0) {
                     lsp_notify_did_change(&buf);
+                    lsp_request_semantic_tokens(&buf);
                 }
         } else {
             // Command mode: capture characters into cmdbuf; show on last row. Backspace, Enter triggers command.
