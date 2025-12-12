@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include "cJSON.h"
 
 #define INITIAL_CAP 128
 
@@ -27,6 +28,13 @@ typedef enum {
     FT_CPP,
 } FileType;
 
+// Diagnostics
+typedef struct Diagnostic {
+    int line;
+    int col;
+    char *msg;
+} Diagnostic;
+
 // LSP handles
 struct LSPProcess {
     pid_t pid;
@@ -42,9 +50,121 @@ typedef struct {
     size_t count;
     size_t cap;
     FileType ft;
+
     struct LSPProcess lsp;
+
+    Diagnostic *diagnostics;
+    size_t diag_count;
+    size_t diag_cap;
 } Buffer;
 
+// Forward declarations for helpers used before their definitions
+static void lsp_send(struct LSPProcess *p, const char *json);
+static char *dupstr(const char *s);
+static void buf_clear_diagnostics(Buffer *buf);
+static void buf_add_diagnostic(Buffer *buf, int line, int col, const char *msg);
+static void lsp_notify_did_open(Buffer *buf);
+static void lsp_initialize(Buffer *buf);
+
+
+static void lsp_notify_did_open(Buffer *buf) {
+    if (buf->lsp.stdin_fd == -1) return;
+
+    // Reconstruct full content
+    size_t total = 0;
+    for (size_t i = 0; i < buf->count; i++)
+        total += strlen(buf->lines[i]) + 1;
+
+    char *text = malloc(total + 1);
+    if (!text) return;
+
+    size_t pos = 0;
+    for (size_t i = 0; i < buf->count; i++) {
+        size_t n = strlen(buf->lines[i]);
+        memcpy(text + pos, buf->lines[i], n);
+        pos += n;
+        text[pos++] = '\n';
+    }
+    text[pos] = '\0';
+
+    // IMPORTANT: clangd wants a valid URI; for now, use CWD.
+    char uri[2048];
+    char cwd[1024];
+    getcwd(cwd, sizeof(cwd));
+    snprintf(uri, sizeof(uri), "file://%s", cwd);
+
+    // Build didOpen JSON using cJSON so text is properly escaped.
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        free(text);
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(root, "method", "textDocument/didOpen");
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "params", params);
+
+    cJSON *td = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "textDocument", td);
+
+    cJSON_AddStringToObject(td, "uri", uri);
+    cJSON_AddStringToObject(td, "languageId", "c");
+    cJSON_AddNumberToObject(td, "version", 1);
+    cJSON_AddStringToObject(td, "text", text);
+
+    char *json = cJSON_PrintUnformatted(root);
+    if (json) {
+        lsp_send(&buf->lsp, json);
+        free(json);
+    }
+
+    cJSON_Delete(root);
+    free(text);
+}
+
+static void lsp_initialize(Buffer *buf) {
+    if (buf->lsp.stdin_fd == -1) return;
+
+    char json[512];
+    snprintf(json, sizeof(json),
+        "{"\
+            "\"jsonrpc\":\"2.0\","\
+            "\"id\":1,"\
+            "\"method\":\"initialize\","\
+            "\"params\":{"\
+                "\"processId\":%d,"\
+                "\"rootUri\":null,"\
+                "\"capabilities\":{}"\
+            "}"\
+        "}",
+        getpid()
+    );
+
+    lsp_send(&buf->lsp, json);
+}
+
+// Clear all diagnostics from buffer
+static void buf_clear_diagnostics(Buffer *buf) {
+    for (size_t i = 0; i < buf->diag_count; i++) {
+        free(buf->diagnostics[i].msg);
+    }
+    buf->diag_count = 0;
+}
+
+// Add diagnostics to the buffer
+static void buf_add_diagnostic(Buffer *buf, int line, int col, const char *msg) {
+    if (buf->diag_count == buf->diag_cap) {
+        buf->diag_cap = buf->diag_cap ? buf->diag_cap * 2 : 8;
+        buf->diagnostics = realloc(buf->diagnostics, buf->diag_cap * sizeof(Diagnostic));
+    }
+
+    buf->diagnostics[buf->diag_count].line = line;
+    buf->diagnostics[buf->diag_count].col  = col;
+    buf->diagnostics[buf->diag_count].msg  = dupstr(msg);
+    buf->diag_count++;
+}
 
 static void buf_init(Buffer *b) {
     // Initialize line storage
@@ -61,6 +181,12 @@ static void buf_init(Buffer *b) {
     b->lsp.stdout_fd = -1;
     b->lsp.lsp_accum = NULL;
     b->lsp.lsp_accum_len = 0;
+
+    // Initialize diagnostics
+    b->diagnostics = NULL;
+    b->diag_count = 0;
+    b->diag_cap = 0;
+
 }
 
 
@@ -97,6 +223,13 @@ static void buf_free(Buffer *b) {
         b->lsp.lsp_accum = NULL;
     }
     b->lsp.lsp_accum_len = 0;
+
+    //Free diagnostics
+    for (size_t i = 0; i < b->diag_count; i++) {
+        free(b->diagnostics[i].msg);
+    }
+    free(b->diagnostics);
+
 }
 
 
@@ -169,9 +302,143 @@ static void lsp_append_data(struct LSPProcess *p, const char *data, size_t n) {
     p->lsp_accum_len += n;
 }
 
-// Handle a complete LSP JSON message (stub)
-static int try_parse_lsp_message(struct LSPProcess *p) {
-    char *buf = p->lsp_accum;
+// Send JSON message to LSP process
+static void lsp_send(struct LSPProcess *p, const char *json) {
+    if (p->stdin_fd == -1) return;
+
+    size_t len = strlen(json);
+    char header[128];
+    int hlen = snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n", len);
+
+    // Write in two pieces: header, then body
+    write(p->stdin_fd, header, hlen);
+    write(p->stdin_fd, json, len);
+}
+
+static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
+    cJSON *root = cJSON_Parse(json_text);
+    if (!root) {
+        fprintf(stderr, "LSP: invalid JSON\n");
+        return;
+    }
+
+    // Common LSP fields
+    cJSON *jsonrpc = cJSON_GetObjectItem(root, "jsonrpc");
+    cJSON *id      = cJSON_GetObjectItem(root, "id");
+    cJSON *method  = cJSON_GetObjectItem(root, "method");
+
+    //initialize response
+    if (!method && id && cJSON_IsNumber(id)) {
+        int msg_id = id->valueint;
+
+        if (msg_id == 1) {
+            // initialize response (LSP spec)
+            cJSON *result = cJSON_GetObjectItem(root, "result");
+            if (result) {
+                // Send "initialized"
+                lsp_send(&buf->lsp,
+                    "{"
+                        "\"jsonrpc\":\"2.0\","
+                        "\"method\":\"initialized\","
+                        "\"params\":{}"
+                    "}"
+                );
+
+                // Send didOpen now that connection is established.
+                lsp_notify_did_open(buf);
+            }
+        }
+
+        // Other response IDs would go here later (hover, completion, etc.)
+
+        cJSON_Delete(root);
+        return;
+    }
+
+    //method present
+    if (method && cJSON_IsString(method)) {
+        const char *m = method->valuestring;
+
+        
+        // publishDiagnostics (clangd sends errors/warnings)
+        
+        if (strcmp(m, "textDocument/publishDiagnostics") == 0) {
+            cJSON *params = cJSON_GetObjectItem(root, "params");
+            if (!params) goto done;
+
+            cJSON *diagnostics = cJSON_GetObjectItem(params, "diagnostics");
+            if (!diagnostics || !cJSON_IsArray(diagnostics)) goto done;
+
+            // Clear old diagnostics for this buffer
+            buf_clear_diagnostics(buf);
+
+            int count = cJSON_GetArraySize(diagnostics);
+            for (int i = 0; i < count; i++) {
+                cJSON *diag = cJSON_GetArrayItem(diagnostics, i);
+                if (!diag) continue;
+
+                cJSON *range = cJSON_GetObjectItem(diag, "range");
+                cJSON *msg   = cJSON_GetObjectItem(diag, "message");
+
+                if (!range || !msg) continue;
+
+                cJSON *start = cJSON_GetObjectItem(range, "start");
+                cJSON *line  = cJSON_GetObjectItem(start, "line");
+                cJSON *col   = cJSON_GetObjectItem(start, "character");
+
+                if (!line || !col || !msg) continue;
+
+                int l = line->valueint;
+                int c = col->valueint;
+                const char *t = msg->valuestring;
+
+                buf_add_diagnostic(buf, l, c, t);
+            }
+
+            //structured diagnostics in buffer → render them later.
+            goto done;
+        }
+        
+        // window/logMessage — used for debugging
+        if (strcmp(m, "window/logMessage") == 0) {
+            cJSON *params = cJSON_GetObjectItem(root, "params");
+            if (params) {
+                cJSON *msg = cJSON_GetObjectItem(params, "message");
+                if (msg && cJSON_IsString(msg)) {
+                    fprintf(stderr, "LSP log: %s\n", msg->valuestring);
+                }
+            }
+            goto done;
+        }
+        
+        // window/showMessage        
+        if (strcmp(m, "window/showMessage") == 0) {
+            cJSON *params = cJSON_GetObjectItem(root, "params");
+            if (params) {
+                cJSON *msg = cJSON_GetObjectItem(params, "message");
+                if (msg && cJSON_IsString(msg)) {
+                    fprintf(stderr, "LSP showMessage: %s\n", msg->valuestring);
+                }
+            }
+            goto done;
+        }
+
+        // clangd sometimes sends telemetry/event notifications
+        if (strcmp(m, "$/progress") == 0 ||
+            strcmp(m, "telemetry/event") == 0) {
+            goto done; // safely ignore
+        }
+    }
+
+done:
+    cJSON_Delete(root);
+}
+
+// Handle a complete LSP JSON message
+static int try_parse_lsp_message(Buffer *buf) {
+    struct LSPProcess *p = &buf->lsp;
+
+    char *acc = p->lsp_accum;
     size_t len = p->lsp_accum_len;
 
     if (len < 4) {
@@ -181,8 +448,8 @@ static int try_parse_lsp_message(struct LSPProcess *p) {
     // Find header terminator: "\r\n\r\n"
     char *header_end = NULL;
     for (size_t i = 0; i + 3 < len; i++) {
-        if (buf[i] == '\r' && buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n') {
-            header_end = buf + i + 4; // start of JSON payload
+        if (acc[i] == '\r' && acc[i+1] == '\n' && acc[i+2] == '\r' && acc[i+3] == '\n') {
+            header_end = acc + i + 4; // start of JSON payload
             break;
         }
     }
@@ -192,20 +459,20 @@ static int try_parse_lsp_message(struct LSPProcess *p) {
     }
 
     // HEADER PARSING
-    size_t header_len = header_end - buf;
+    size_t header_len = header_end - acc;
     size_t content_length = 0;
 
     // Safely isolate the header for parsing
     // (temporarily NUL-terminate; we restore it afterward)
-    char saved = buf[header_len];
-    buf[header_len] = '\0';
+    char saved = acc[header_len];
+    acc[header_len] = '\0';
 
     // Find the "Content-Length:" field strictly inside the header
     const char *needle = "Content-Length:";
-    char *cl = strstr(buf, needle);
+    char *cl = strstr(acc, needle);
 
-    if (!cl || cl > (char *)(&buf[header_len - strlen(needle)])) {
-        buf[header_len] = saved;
+    if (!cl || cl >= acc + header_len) {
+        acc[header_len] = saved;
         return -1; // malformed header
     }
 
@@ -219,7 +486,7 @@ static int try_parse_lsp_message(struct LSPProcess *p) {
     content_length = strtoul(cl, NULL, 10);
 
     // Restore buffer
-    buf[header_len] = saved;
+    acc[header_len] = saved;
 
     // TOTAL SIZE CHECK
     size_t total_needed = header_len + content_length;
@@ -238,14 +505,14 @@ static int try_parse_lsp_message(struct LSPProcess *p) {
     json[content_length] = '\0';
 
     // Handle the finished JSON message
-    handle_lsp_json_message(json);
+    handle_lsp_json_message(buf, json);
     free(json);
 
     // REMOVE THE PROCESSED MESSAGE FROM THE BUFFER
     size_t remaining = len - total_needed;
 
     if (remaining > 0) {
-        memmove(buf, buf + total_needed, remaining);
+        memmove(acc, acc + total_needed, remaining);
     }
 
     p->lsp_accum_len = remaining;
@@ -264,9 +531,6 @@ static int try_parse_lsp_message(struct LSPProcess *p) {
 
     return 1; // message processed
 }
-
-
-
 
 struct LSPProcess spawn_lsp(void) {
     struct LSPProcess proc = {0};
@@ -404,7 +668,9 @@ int main(int argc, char **argv) {
 
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_BLACK, 248);   // status bar 
-    init_pair(3, 8, COLOR_BLACK);     // gutter (gray on black) 
+    init_pair(3, 8, COLOR_BLACK);     // gutter (gray on black)
+    init_pair(4, COLOR_RED, COLOR_BLACK); // errors
+    init_pair(5, COLOR_YELLOW, COLOR_BLACK); // warnings
 
     // if no filename at startup, prompt user before main loop
     int maxy, maxx;
@@ -445,6 +711,9 @@ int main(int argc, char **argv) {
 
     if (buf.ft == FT_C || buf.ft == FT_CPP) {
         buf.lsp = spawn_lsp();
+        if (buf.lsp.pid > 0) {
+            lsp_initialize(&buf);
+        }
     }
     if (buf.lsp.pid <= 0) {
         mvprintw(maxy - 1, 0, "Warning: failed to start clangd LSP server");
@@ -512,9 +781,23 @@ int main(int argc, char **argv) {
         int row = 1;
         for (size_t lineno = scroll_y; lineno < buf.count && row < maxy - 2; lineno++) {
             // print logical line number 
-            wattron(main_win, COLOR_PAIR(3));
-            mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
-            wattroff(main_win, COLOR_PAIR(3));
+            int has_diag = 0;
+            for (size_t d = 0; d < buf.diag_count; d++) {
+                if (buf.diagnostics[d].line == (int)lineno) {
+                    has_diag = 1;
+                    break;
+                }
+            }
+            // highlight line number when diagnostics exist on this line
+            if (has_diag){
+                wattron(main_win, COLOR_PAIR(4));
+                mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                wattroff(main_win, COLOR_PAIR(4));
+            } else {
+                wattron(main_win, COLOR_PAIR(3));
+                mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                wattroff(main_win, COLOR_PAIR(3));
+            }
 
             int col = col_offset;
             const char *p = buf.lines[lineno];
@@ -524,10 +807,15 @@ int main(int argc, char **argv) {
                     // wrap
                     row++;
                     if (row >= maxy - 2) break;
-                    wattron(main_win, COLOR_PAIR(3));
-                    mvwprintw(main_win, row, 1, "%*s", gutter_width, "");
-                    wattroff(main_win, COLOR_PAIR(3));
-                    col = col_offset;
+                    if (has_diag){
+                        wattron(main_win, COLOR_PAIR(4));
+                        mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                        wattroff(main_win, COLOR_PAIR(4));
+                    } else {
+                        wattron(main_win, COLOR_PAIR(3));
+                        mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                        wattroff(main_win, COLOR_PAIR(3));
+                    }
                 }
                 if (row >= maxy - 2) break;
                 mvwaddch(main_win, row, col++, p[ip++]);
@@ -555,7 +843,7 @@ int main(int argc, char **argv) {
             snprintf(status_left, sizeof(status_left), "[No Name]%s", mod_suffix);
         }
         const char *mode_str = mode_insert ? "-- INSERT --" : "-- COMMAND --";
-        mvwprintw(main_win, maxy - 2, 2, "%s %s", status_left, mode_str);
+        mvwprintw(main_win, maxy - 2, 2, "%s %s [diags:%zu]", status_left, mode_str, buf.diag_count);
 
         // clock
         time_t now = time(NULL);
@@ -950,7 +1238,7 @@ int main(int argc, char **argv) {
                 lsp_append_data(&buf.lsp, temp, (size_t)n);
 
                 int r;
-                while ((r = try_parse_lsp_message(&buf.lsp)) == 1) {
+                while ((r = try_parse_lsp_message(&buf)) == 1) {
                     // keep parsing messages
                 }
 
