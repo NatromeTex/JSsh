@@ -32,6 +32,7 @@ typedef enum {
 typedef struct Diagnostic {
     int line;
     int col;
+    int severity;
     char *msg;
 } Diagnostic;
 
@@ -56,15 +57,23 @@ typedef struct {
     Diagnostic *diagnostics;
     size_t diag_count;
     size_t diag_cap;
+
+    // LSP document tracking
+    int lsp_version;        // last version sent to LSP
+    int lsp_opened;         // didOpen was sent successfully
+    int lsp_dirty;          // buffer changed since last sync
+    char lsp_uri[4096];     // URI used in LSP textDocument
+    char filepath[1024];    // filename as opened in jsvim
 } Buffer;
 
 // Forward declarations for helpers used before their definitions
 static void lsp_send(struct LSPProcess *p, const char *json);
 static char *dupstr(const char *s);
 static void buf_clear_diagnostics(Buffer *buf);
-static void buf_add_diagnostic(Buffer *buf, int line, int col, const char *msg);
+static void buf_add_diagnostic(Buffer *buf, int line, int col, int severity, const char *msg);
 static void lsp_notify_did_open(Buffer *buf);
 static void lsp_initialize(Buffer *buf);
+static void lsp_notify_did_change(Buffer *buf);
 
 
 static void lsp_notify_did_open(Buffer *buf) {
@@ -87,11 +96,21 @@ static void lsp_notify_did_open(Buffer *buf) {
     }
     text[pos] = '\0';
 
-    // IMPORTANT: clangd wants a valid URI; for now, use CWD.
-    char uri[2048];
-    char cwd[1024];
-    getcwd(cwd, sizeof(cwd));
-    snprintf(uri, sizeof(uri), "file://%s", cwd);
+    // IMPORTANT: clangd wants a valid URI.
+    // Prefer the actual file path when available.
+    if (buf->lsp_uri[0] == '\0') {
+        if (buf->filepath[0] == '/') {
+            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", buf->filepath);
+        } else if (buf->filepath[0] != '\0') {
+            char cwd[1024];
+            getcwd(cwd, sizeof(cwd));
+            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s/%s", cwd, buf->filepath);
+        } else {
+            char cwd[1024];
+            getcwd(cwd, sizeof(cwd));
+            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", cwd);
+        }
+    }
 
     // Build didOpen JSON using cJSON so text is properly escaped.
     cJSON *root = cJSON_CreateObject();
@@ -109,9 +128,10 @@ static void lsp_notify_did_open(Buffer *buf) {
     cJSON *td = cJSON_CreateObject();
     cJSON_AddItemToObject(params, "textDocument", td);
 
-    cJSON_AddStringToObject(td, "uri", uri);
+    cJSON_AddStringToObject(td, "uri", buf->lsp_uri);
     cJSON_AddStringToObject(td, "languageId", "c");
-    cJSON_AddNumberToObject(td, "version", 1);
+    buf->lsp_version = 1;
+    cJSON_AddNumberToObject(td, "version", buf->lsp_version);
     cJSON_AddStringToObject(td, "text", text);
 
     char *json = cJSON_PrintUnformatted(root);
@@ -122,6 +142,9 @@ static void lsp_notify_did_open(Buffer *buf) {
 
     cJSON_Delete(root);
     free(text);
+
+    buf->lsp_opened = 1;
+    buf->lsp_dirty = 0;
 }
 
 static void lsp_initialize(Buffer *buf) {
@@ -145,6 +168,68 @@ static void lsp_initialize(Buffer *buf) {
     lsp_send(&buf->lsp, json);
 }
 
+// Send full-buffer didChange when the buffer was modified.
+static void lsp_notify_did_change(Buffer *buf) {
+    if (buf->lsp.stdin_fd == -1) return;
+    if (!buf->lsp_opened) return;
+
+    // Reconstruct full content
+    size_t total = 0;
+    for (size_t i = 0; i < buf->count; i++)
+        total += strlen(buf->lines[i]) + 1;
+
+    char *text = malloc(total + 1);
+    if (!text) return;
+
+    size_t pos = 0;
+    for (size_t i = 0; i < buf->count; i++) {
+        size_t n = strlen(buf->lines[i]);
+        memcpy(text + pos, buf->lines[i], n);
+        pos += n;
+        text[pos++] = '\n';
+    }
+    text[pos] = '\0';
+
+    // Increment document version for LSP.
+    buf->lsp_version++;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        free(text);
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(root, "method", "textDocument/didChange");
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "params", params);
+
+    cJSON *td = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "textDocument", td);
+    cJSON_AddStringToObject(td, "uri", buf->lsp_uri);
+    cJSON_AddNumberToObject(td, "version", buf->lsp_version);
+
+    cJSON *changes = cJSON_CreateArray();
+    cJSON_AddItemToObject(params, "contentChanges", changes);
+
+    cJSON *change = cJSON_CreateObject();
+    cJSON_AddItemToArray(changes, change);
+    // Send full text as a single change.
+    cJSON_AddStringToObject(change, "text", text);
+
+    char *json = cJSON_PrintUnformatted(root);
+    if (json) {
+        lsp_send(&buf->lsp, json);
+        free(json);
+    }
+
+    cJSON_Delete(root);
+    free(text);
+
+    buf->lsp_dirty = 0;
+}
+
 // Clear all diagnostics from buffer
 static void buf_clear_diagnostics(Buffer *buf) {
     for (size_t i = 0; i < buf->diag_count; i++) {
@@ -154,7 +239,7 @@ static void buf_clear_diagnostics(Buffer *buf) {
 }
 
 // Add diagnostics to the buffer
-static void buf_add_diagnostic(Buffer *buf, int line, int col, const char *msg) {
+static void buf_add_diagnostic(Buffer *buf, int line, int col, int severity, const char *msg) {
     if (buf->diag_count == buf->diag_cap) {
         buf->diag_cap = buf->diag_cap ? buf->diag_cap * 2 : 8;
         buf->diagnostics = realloc(buf->diagnostics, buf->diag_cap * sizeof(Diagnostic));
@@ -162,6 +247,7 @@ static void buf_add_diagnostic(Buffer *buf, int line, int col, const char *msg) 
 
     buf->diagnostics[buf->diag_count].line = line;
     buf->diagnostics[buf->diag_count].col  = col;
+    buf->diagnostics[buf->diag_count].severity = severity;
     buf->diagnostics[buf->diag_count].msg  = dupstr(msg);
     buf->diag_count++;
 }
@@ -186,6 +272,13 @@ static void buf_init(Buffer *b) {
     b->diagnostics = NULL;
     b->diag_count = 0;
     b->diag_cap = 0;
+
+    // Initialize LSP document state
+    b->lsp_version = 0;
+    b->lsp_opened = 0;
+    b->lsp_dirty = 0;
+    b->lsp_uri[0] = '\0';
+    b->filepath[0] = '\0';
 
 }
 
@@ -366,6 +459,11 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
             cJSON *params = cJSON_GetObjectItem(root, "params");
             if (!params) goto done;
 
+            // Ignore errors from other files
+            cJSON *uri = cJSON_GetObjectItem(params, "uri");
+            if (!uri || strcmp(uri->valuestring, buf->lsp_uri) != 0)
+                goto done;
+
             cJSON *diagnostics = cJSON_GetObjectItem(params, "diagnostics");
             if (!diagnostics || !cJSON_IsArray(diagnostics)) goto done;
 
@@ -392,7 +490,27 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
                 int c = col->valueint;
                 const char *t = msg->valuestring;
 
-                buf_add_diagnostic(buf, l, c, t);
+                cJSON *sev = cJSON_GetObjectItem(diag, "severity");
+                int severity = (sev && cJSON_IsNumber(sev)) ? sev->valueint : 3;
+                {
+                    FILE *df = fopen("diag.log", "a");
+                    if (df) {
+                        fprintf(df,
+                            "DIAGNOSTIC:\n"
+                            "  line: %d\n"
+                            "  col: %d\n"
+                            "  severity: %d\n"
+                            "  message: %s\n"
+                            "----------------------------------------\n",
+                            l, c, severity, t
+                        );
+                        fclose(df);
+                    }
+                }
+                if (severity > 2)
+                    continue;
+
+                buf_add_diagnostic(buf, l, c, severity, t);
             }
 
             //structured diagnostics in buffer → render them later.
@@ -566,10 +684,10 @@ struct LSPProcess spawn_lsp(void) {
         close(in_pipe[1]);
         close(out_pipe[0]);
 
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
+        int logfd = open("clangd.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (logfd >= 0) {
+            dup2(logfd, STDERR_FILENO);
+            close(logfd);
         }
 
         setpgid(0, 0);
@@ -669,8 +787,8 @@ int main(int argc, char **argv) {
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_BLACK, 248);   // status bar 
     init_pair(3, 8, COLOR_BLACK);     // gutter (gray on black)
-    init_pair(4, COLOR_RED, COLOR_BLACK); // errors
-    init_pair(5, COLOR_YELLOW, COLOR_BLACK); // warnings
+    init_pair(4, 196, COLOR_BLACK); // errors
+    init_pair(5, 226, COLOR_BLACK); // warnings
 
     // if no filename at startup, prompt user before main loop
     int maxy, maxx;
@@ -708,6 +826,9 @@ int main(int argc, char **argv) {
         }
     }
     buf.ft = detect_filetype(filename);
+    // Remember the path for LSP URI construction
+    strncpy(buf.filepath, filename, sizeof(buf.filepath) - 1);
+    buf.filepath[sizeof(buf.filepath) - 1] = '\0';
 
     if (buf.ft == FT_C || buf.ft == FT_CPP) {
         buf.lsp = spawn_lsp();
@@ -781,20 +902,27 @@ int main(int argc, char **argv) {
         int row = 1;
         for (size_t lineno = scroll_y; lineno < buf.count && row < maxy - 2; lineno++) {
             // print logical line number 
-            int has_diag = 0;
-            for (size_t d = 0; d < buf.diag_count; d++) {
-                if (buf.diagnostics[d].line == (int)lineno) {
-                    has_diag = 1;
-                    break;
+            int diag_severity = 0;
+                for (size_t d = 0; d < buf.diag_count; d++) {
+                    if (buf.diagnostics[d].line == (int)lineno) {
+                        diag_severity = buf.diagnostics[d].severity; // 1=error, 2=warning
+                        break;
+                    }
                 }
-            }
+
             // highlight line number when diagnostics exist on this line
-            if (has_diag){
-                wattron(main_win, COLOR_PAIR(4));
+            if (diag_severity == 1){
+                wattron(main_win, COLOR_PAIR(4));   // red (error)
                 mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
                 wattroff(main_win, COLOR_PAIR(4));
-            } else {
-                wattron(main_win, COLOR_PAIR(3));
+            }
+            else if (diag_severity == 2){
+                wattron(main_win, COLOR_PAIR(5));   // yellow (warning)
+                mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                wattroff(main_win, COLOR_PAIR(5));
+            }
+            else {
+                wattron(main_win, COLOR_PAIR(3));   // normal gutter
                 mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
                 wattroff(main_win, COLOR_PAIR(3));
             }
@@ -807,12 +935,18 @@ int main(int argc, char **argv) {
                     // wrap
                     row++;
                     if (row >= maxy - 2) break;
-                    if (has_diag){
-                        wattron(main_win, COLOR_PAIR(4));
+                    if (diag_severity == 1){
+                        wattron(main_win, COLOR_PAIR(4));   // red (error)
                         mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
                         wattroff(main_win, COLOR_PAIR(4));
-                    } else {
-                        wattron(main_win, COLOR_PAIR(3));
+                    }
+                    else if (diag_severity == 2){
+                        wattron(main_win, COLOR_PAIR(5));   // yellow (warning)
+                        mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                        wattroff(main_win, COLOR_PAIR(5));
+                    }
+                    else {
+                        wattron(main_win, COLOR_PAIR(3));   // normal gutter
                         mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
                         wattroff(main_win, COLOR_PAIR(3));
                     }
@@ -857,11 +991,26 @@ int main(int argc, char **argv) {
         wattron(cmd_win, COLOR_PAIR(1));
         for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
         wattroff(cmd_win, COLOR_PAIR(1));
+
         if (!mode_insert) {
-            // show typed command
             wattron(cmd_win, COLOR_PAIR(1));
             mvwprintw(cmd_win, 0, 1, ":%s", cmdbuf);
             wattroff(cmd_win, COLOR_PAIR(1));
+        } else {
+            // INSERT MODE: automatically show diagnostic for current line
+            for (size_t d = 0; d < buf.diag_count; d++) {
+                if (buf.diagnostics[d].line == (int)cursor_line) {
+                
+                    const char *stype =
+                        (buf.diagnostics[d].severity == 1 ? "error" :
+                         buf.diagnostics[d].severity == 2 ? "warning" : "info");
+                        
+                    wattron(cmd_win, COLOR_PAIR(1));
+                    mvwprintw(cmd_win, 0, 1, "[%s] %s", stype, buf.diagnostics[d].msg);
+                    wattroff(cmd_win, COLOR_PAIR(1));
+                    break;  // show first diag on that line
+                }
+            }
         }
 
         // Compute cursor screen position (approx): need to compute wrapped rows up to cursor_line and cursor_col
@@ -961,7 +1110,7 @@ int main(int argc, char **argv) {
                 cmdbuf[0] = '\0';
                 continue;
             }
-            switch (ch) {
+                switch (ch) {
                 case ERR:
                     // timeout for clock update; continue
                     break;
@@ -975,14 +1124,16 @@ int main(int argc, char **argv) {
                     }
                     break;
                 case KEY_DOWN:
-                    cursor_line++;
-                    size_t len = strlen(buf.lines[cursor_line]);
-                    if (cursor_col > len) cursor_col = len;
-                    if (cursor_line >= scroll_y + visible_rows) {
-                        if (cursor_line >= visible_rows)
-                            scroll_y = cursor_line - (visible_rows);
-                        else
-                            scroll_y = 0;
+                    if (cursor_line + 1 < buf.count) {
+                        cursor_line++;
+                        size_t len = strlen(buf.lines[cursor_line]);
+                        if (cursor_col > len) cursor_col = len;
+                        if (cursor_line >= scroll_y + visible_rows) {
+                            if (cursor_line >= visible_rows)
+                                scroll_y = cursor_line - (visible_rows - 1);
+                            else
+                                scroll_y = 0;
+                        }
                     }
                     break;
                 case KEY_LEFT:
@@ -1018,6 +1169,7 @@ int main(int argc, char **argv) {
                         memmove(line + cursor_col - 1, line + cursor_col, len - cursor_col + 1);
                         cursor_col--;
                         modified = 1;
+                        buf.lsp_dirty = 1;
                     } else if (cursor_line > 0) {
                         // join with previous line
                         size_t prevlen = strlen(buf.lines[cursor_line - 1]);
@@ -1031,6 +1183,7 @@ int main(int argc, char **argv) {
                         cursor_line--;
                         cursor_col = prevlen;
                         modified = 1;
+                        buf.lsp_dirty = 1;
                     }
                     break;
                 case '\n':
@@ -1046,6 +1199,7 @@ int main(int argc, char **argv) {
                         cursor_line++;
                         cursor_col = 0;
                         modified = 1;
+                        buf.lsp_dirty = 1;
                     }
                     break;
                 default:
@@ -1060,9 +1214,15 @@ int main(int argc, char **argv) {
                         buf.lines[cursor_line] = line;
                         cursor_col++;
                         modified = 1;
+                        buf.lsp_dirty = 1;
                     }
                     break;
             }
+
+                // If the buffer changed and LSP is active, send didChange.
+                if (buf.lsp_dirty && (buf.ft == FT_C || buf.ft == FT_CPP) && buf.lsp.pid > 0) {
+                    lsp_notify_did_change(&buf);
+                }
         } else {
             // Command mode: capture characters into cmdbuf; show on last row. Backspace, Enter triggers command.
             if (ch == ERR) {
