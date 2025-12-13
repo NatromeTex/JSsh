@@ -95,10 +95,21 @@ endif
 
 
 # Build standalone jsvim only when apps module is enabled
+JSVIM_SRC = lib/apps/JSVIM/main.c \
+            lib/apps/JSVIM/editor.c \
+            lib/apps/JSVIM/buffer.c \
+            lib/apps/JSVIM/render.c \
+            lib/apps/JSVIM/highlight.c \
+            lib/apps/JSVIM/lsp.c \
+            lib/apps/JSVIM/language.c \
+            lib/apps/JSVIM/util.c \
+            lib/apps/JSVIM/semantic.c \
+            lib/apps/JSVIM/cJSON.c
+
 ifeq ($(APPS_ENABLED),yes)
-bin/jsvim: lib/apps/jsvim.c
+bin/jsvim: $(JSVIM_SRC)
 	@mkdir -p bin
-	$(CC) $(CFLAGS) lib/apps/jsvim.c -lncurses -o bin/jsvim
+	$(CC) $(CFLAGS) -I./lib/apps/JSVIM $(JSVIM_SRC) -lncurses -o bin/jsvim
 endif
 
 
