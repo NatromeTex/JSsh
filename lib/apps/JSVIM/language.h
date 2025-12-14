@@ -7,6 +7,15 @@ typedef enum {
     FT_NONE = 0,
     FT_C,
     FT_CPP,
+    FT_JS,
+    FT_PYTHON,
+    FT_RUST,
+    FT_GO,
+    FT_JAVA,
+    FT_SH,
+    FT_MAKEFILE,
+    FT_JSON,
+    FT_MARKDOWN,
 } FileType;
 
 // Get file extension from filename

@@ -295,7 +295,7 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
                 return;
             }
         
-            semantic_tokens_clear(buf);
+            semantic_tokens_clear_lsp(buf);
         
             int line = 0;
             int col  = 0;
@@ -324,6 +324,7 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
                 token.col  = col;
                 token.len  = length;
                 token.modifiers = modifiers;
+                token.source = TOKEN_SOURCE_LSP;
             
                 SemanticKind kind = SEM_NONE;
                 if (type_index >= 0 && (size_t)type_index < buf->lsp_token_map_len)

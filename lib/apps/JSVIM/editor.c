@@ -3,6 +3,7 @@
 #include "buffer.h"
 #include "lsp.h"
 #include "language.h"
+#include "highlight.h"
 #include "util.h"
 #include "render.h"
 #include <string.h>
@@ -147,10 +148,17 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         break;
     }
 
-    // If the buffer changed and LSP is active, send didChange
-    if (buf->lsp_dirty && (buf->ft == FT_C || buf->ft == FT_CPP) && buf->lsp.pid > 0) {
-        lsp_notify_did_change(buf);
-        lsp_request_semantic_tokens(buf);
+    // If the buffer changed, re-highlight
+    if (buf->lsp_dirty) {
+        // Always do regex highlighting first (basic syntax)
+        highlight_buffer(buf);
+        
+        // If LSP is active, also request semantic tokens (layered on top)
+        if ((buf->ft == FT_C || buf->ft == FT_CPP) && buf->lsp.pid > 0) {
+            lsp_notify_did_change(buf);
+            lsp_request_semantic_tokens(buf);
+        }
+        buf->lsp_dirty = 0;
     }
 }
 

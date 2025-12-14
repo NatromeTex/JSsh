@@ -15,6 +15,7 @@
 #include "render.h"
 #include "language.h"
 #include "lsp.h"
+#include "highlight.h"
 
 int main(int argc, char **argv) {
     EditorState ed;
@@ -77,15 +78,15 @@ int main(int argc, char **argv) {
     strncpy(ed.buf.filepath, ed.filename, sizeof(ed.buf.filepath) - 1);
     ed.buf.filepath[sizeof(ed.buf.filepath) - 1] = '\0';
 
+    // Always do regex highlighting first (basic syntax highlighting)
+    highlight_buffer(&ed.buf);
+
+    // Then try to start LSP for deep semantic highlighting (layered on top)
     if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP) {
         ed.buf.lsp = spawn_lsp();
         if (ed.buf.lsp.pid > 0) {
             lsp_initialize(&ed.buf);
         }
-    }
-    if (ed.buf.lsp.pid <= 0) {
-        mvprintw(maxy - 1, 0, "Warning: failed to start clangd LSP server");
-        getch();
     }
 
     // Create two windows: main window and command window
@@ -155,6 +156,7 @@ int main(int argc, char **argv) {
     if (main_win) delwin(main_win);
     if (cmd_win) delwin(cmd_win);
     editor_cleanup(&ed);
+    highlight_cleanup();
     render_cleanup();
 
     return 0;
