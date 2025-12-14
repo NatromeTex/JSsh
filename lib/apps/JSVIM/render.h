@@ -27,7 +27,7 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
                         size_t scroll_y, size_t cursor_line, size_t cursor_col,
                         int gutter_width,
                         const char *title, const char *filename, int have_filename,
-                        int modified, int mode_insert);
+                        int modified, int mode_insert, int line_number_relative);
 
 // Render the command window
 void render_command_window(WINDOW *cmd_win, Buffer *buf,

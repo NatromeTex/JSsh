@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
         render_main_window(main_win, &ed.buf, maxy, maxx,
                           ed.scroll_y, ed.cursor_line, ed.cursor_col,
                           gutter_width, title, ed.filename, ed.have_filename,
-                          ed.modified, ed.mode_insert);
+                          ed.modified, ed.mode_insert, ed.line_number_relative);
 
         render_command_window(cmd_win, &ed.buf, maxx, ed.mode_insert,
                              ed.cmdbuf, ed.cursor_line);

@@ -24,6 +24,7 @@ void editor_init(EditorState *ed) {
     ed->cmdlen = 0;
     ed->quit = 0;
     ed->force_quit = 0;
+    ed->line_number_relative = 0;
 }
 
 void editor_cleanup(EditorState *ed) {
@@ -310,6 +311,12 @@ void editor_handle_command_mode(EditorState *ed, int ch,
                         }
                     }
                 }
+            } else if (strcmp(ed->cmdbuf, "set rel") == 0) {
+                // set relative line numbers
+                ed->line_number_relative = 1;
+            } else if (strcmp(ed->cmdbuf, "set nu") == 0) {
+                // set absolute line numbers
+                ed->line_number_relative = 0;
             } else {
                 // unknown command; show it briefly
                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));

@@ -45,8 +45,7 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
                         size_t scroll_y, size_t cursor_line, size_t cursor_col,
                         int gutter_width,
                         const char *title, const char *filename, int have_filename,
-                        int modified, int mode_insert) {
-    (void)cursor_line;  // Used elsewhere for cursor positioning
+                        int modified, int mode_insert, int line_number_relative) {
     (void)cursor_col;
     
     werase(main_win);
@@ -76,18 +75,32 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
             }
         }
 
+        // Calculate line number to display (absolute or relative)
+        size_t display_num;
+        if (line_number_relative) {
+            if (lineno == cursor_line) {
+                display_num = lineno + 1;  // current line shows absolute number
+            } else if (lineno > cursor_line) {
+                display_num = lineno - cursor_line;
+            } else {
+                display_num = cursor_line - lineno;
+            }
+        } else {
+            display_num = lineno + 1;
+        }
+
         // highlight line number when diagnostics exist on this line
         if (diag_severity == 1) {
             wattron(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
-            mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+            mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
             wattroff(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
         } else if (diag_severity == 2) {
             wattron(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
-            mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+            mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
             wattroff(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
         } else {
             wattron(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
-            mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+            mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
             wattroff(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
         }
 
@@ -101,15 +114,15 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
                 if (row >= maxy - 2) break;
                 if (diag_severity == 1) {
                     wattron(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
                     wattroff(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
                 } else if (diag_severity == 2) {
                     wattron(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
                     wattroff(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
                 } else {
                     wattron(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, lineno + 1);
+                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
                     wattroff(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
                 }
                 col = col_offset;

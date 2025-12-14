@@ -24,6 +24,7 @@ typedef struct {
     
     int quit;
     int force_quit;
+    int line_number_relative;  // 0 = absolute, 1 = relative
 } EditorState;
 
 // Initialize editor state
