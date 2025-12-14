@@ -1,0 +1,558 @@
+# JSVIM - A Terminal Text Editor for JSSH
+
+JSVIM is a lightweight terminal-based text editor built with ncurses, designed as part of the JSSH project. It provides vim-like functionality with modern features including syntax highlighting and LSP (Language Server Protocol) support for enhanced code intelligence.
+
+## Features
+
+- **Modal Editing**: Insert and command modes similar to vim
+- **Syntax Highlighting**: Regex-based highlighting for multiple languages
+- **LSP Integration**: Deep semantic highlighting for C/C++ via clangd
+- **File Type Detection**: Automatic language detection based on file extension
+- **Block Comment Support**: Proper handling of multi-line comments
+
+## Supported Languages
+
+| Language   | File Extensions                           | LSP Support |
+|------------|-------------------------------------------|-------------|
+| C          | `.c`, `.h`                                | ✓ (clangd)  |
+| C++        | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hxx`, `.hh` | ✓ (clangd)  |
+| JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx`             | ✓ (typescript-language-server) |
+| TypeScript | `.ts`, `.tsx`                             | ✓ (typescript-language-server) |
+| Python     | `.py`, `.pyw`, `.pyi`                     | ✓ (pyright-langserver) |
+| Rust       | `.rs`                                     | ✗           |
+| Go         | `.go`                                     | ✗           |
+| Java       | `.java`                                   | ✗           |
+| Shell      | `.sh`, `.bash`, `.zsh`                    | ✗           |
+| Makefile   | `Makefile`, `makefile`, `GNUmakefile`, `.mk` | ✗        |
+| JSON       | `.json`                                   | ✗           |
+| Markdown   | `.md`, `.markdown`                        | ✗           |
+
+## Architecture Overview
+
+```
+JSVIM/
+├── main.c        # Entry point and main loop
+├── editor.c/h    # Editor state and key handling
+├── buffer.c/h    # Text buffer management
+├── render.c/h    # ncurses rendering
+├── language.c/h  # File type detection
+├── highlight.c/h # Syntax highlighting engine
+├── semantic.c/h  # Semantic token types
+├── lsp.c/h       # Language Server Protocol client
+└── util.c/h      # Common utilities
+```
+
+## Highlighting System
+
+JSVIM uses a two-tier highlighting system:
+
+1. **Regex-based highlighting** - Fast, pattern-matching based syntax highlighting
+2. **LSP semantic highlighting** - Deep, context-aware highlighting from language servers
+
+LSP tokens take priority over regex tokens when both are available, providing more accurate highlighting for complex code.
+
+---
+
+# Adding New Language Rulesets
+
+This guide explains how to add syntax highlighting support for new languages in JSVIM.
+
+## Step 1: Add FileType Enum
+
+In [language.h](language.h), add a new entry to the `FileType` enum:
+
+```c
+typedef enum {
+    FT_NONE = 0,
+    FT_C,
+    FT_CPP,
+    FT_JS,
+    FT_PYTHON,
+    // ... existing types ...
+    FT_RUBY,      // <-- Add your new language here
+} FileType;
+```
+
+## Step 2: Add File Extension Detection
+
+In [language.c](language.c), update the `detect_filetype()` function to recognize your language's file extensions:
+
+```c
+FileType detect_filetype(const char *filename) {
+    // ... existing code ...
+    
+    // Ruby
+    if (strcmp(ext, "rb") == 0 || strcmp(ext, "rake") == 0 ||
+        strcmp(ext, "gemspec") == 0)
+        return FT_RUBY;
+    
+    return FT_NONE;
+}
+```
+
+For special filenames without extensions (like `Rakefile`), add detection by basename:
+
+```c
+// Check for extensionless files by basename
+const char *basename = strrchr(filename, '/');
+basename = basename ? basename + 1 : filename;
+
+if (strcmp(basename, "Rakefile") == 0)
+    return FT_RUBY;
+```
+
+## Step 3: Create Highlight Rules
+
+In [highlight.c](highlight.c), create an array of `HighlightRule` structures for your language. Each rule maps a regex pattern to a `SemanticKind`:
+
+```c
+// ============================================================================
+// Ruby Highlight Rules
+// ============================================================================
+
+static HighlightRule ruby_rules[] = {
+    // Line comments
+    { "#.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (double quotes)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (single quotes)
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(def|class|module|end|if|else|elsif|unless|case|when|while|until|for|do|begin|rescue|ensure|raise|return|yield|break|next|redo|retry|self|super|nil|true|false|and|or|not|in|then|alias|defined\\?)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in types/classes
+    { "\\b(Array|Hash|String|Integer|Float|Symbol|Proc|Lambda|Range|Regexp|Object|Class|Module|NilClass|TrueClass|FalseClass)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Symbols
+    { ":[a-zA-Z_][a-zA-Z0-9_]*", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Instance variables
+    { "@[a-zA-Z_][a-zA-Z0-9_]*", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Class variables
+    { "@@[a-zA-Z_][a-zA-Z0-9_]*", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers
+    { "\\b[0-9]+\\.[0-9]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0x[0-9a-fA-F]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+```
+
+### Available SemanticKind Values
+
+| Kind | Description | Typical Color |
+|------|-------------|---------------|
+| `SEM_KEYWORD` | Language keywords | Blue/Purple |
+| `SEM_TYPE` | Types, classes, structs | Green |
+| `SEM_FUNCTION` | Function/method names | Yellow |
+| `SEM_VARIABLE` | Variables | Blue |
+| `SEM_PARAMETER` | Function parameters | Blue |
+| `SEM_PROPERTY` | Object properties | Yellow |
+| `SEM_MACRO` | Preprocessor macros | Yellow |
+| `SEM_STRING` | String literals | Orange/Red |
+| `SEM_NUMBER` | Numeric literals | Cyan |
+| `SEM_COMMENT` | Comments | Gray |
+| `SEM_NAMESPACE` | Namespaces | Green |
+| `SEM_CLASS` | Class names | Green |
+| `SEM_STRUCT` | Struct names | Green |
+| `SEM_ENUM` | Enum names | Green |
+| `SEM_OPERATOR` | Operators | Default |
+
+## Step 4: Create Language Highlighter
+
+Create a `LanguageHighlighter` struct that ties your rules together:
+
+```c
+static LanguageHighlighter ruby_highlighter = {
+    .ft = FT_RUBY,
+    .rules = ruby_rules,
+    .rule_count = sizeof(ruby_rules) / sizeof(ruby_rules[0]),
+    .block_comment_start = "=begin",  // Ruby's block comment start
+    .block_comment_end = "=end"       // Ruby's block comment end
+};
+```
+
+For languages without block comments, set these to `NULL`:
+
+```c
+.block_comment_start = NULL,
+.block_comment_end = NULL
+```
+
+## Step 5: Register the Highlighter
+
+Add your highlighter to the `all_highlighters` array in [highlight.c](highlight.c):
+
+```c
+static LanguageHighlighter *all_highlighters[] = {
+    &c_highlighter,
+    &cpp_highlighter,
+    &ruby_highlighter,  // <-- Add your highlighter here
+};
+```
+
+The `highlighter_count` is calculated automatically using `sizeof()`.
+
+## Writing Good Regex Patterns
+
+### Tips
+
+1. **Order matters**: Rules are applied in order. Put more specific patterns (like line comments) before general ones (like operators).
+
+2. **Word boundaries**: Use `\\b` for word boundaries to avoid partial matches:
+   ```c
+   "\\bif\\b"  // Matches "if" but not "endif" or "iffy"
+   ```
+
+3. **Escape properly**: In C strings, backslashes must be doubled:
+   ```c
+   "\\b[0-9]+\\b"  // Regex: \b[0-9]+\b
+   ```
+
+4. **Character classes**: Use `[...]` for character sets:
+   ```c
+   "[a-zA-Z_][a-zA-Z0-9_]*"  // Identifier pattern
+   ```
+
+5. **Alternation**: Use `|` for alternatives:
+   ```c
+   "\\b(if|else|while|for)\\b"
+   ```
+
+6. **Line anchors**: Use `^` for start of line, `$` for end:
+   ```c
+   "^[ \\t]*#"   // Matches preprocessor directives at line start
+   "//.*$"       // Matches line comments to end of line
+   ```
+
+### Common Patterns
+
+```c
+// Line comments (// style)
+"//.*$"
+
+// Line comments (# style)
+"#.*$"
+
+// Double-quoted strings (with escape handling)
+"\"([^\"\\\\]|\\\\.)*\""
+
+// Single-quoted strings
+"'([^'\\\\]|\\\\.)*'"
+
+// Identifiers
+"[a-zA-Z_][a-zA-Z0-9_]*"
+
+// Decimal numbers
+"\\b[0-9]+\\b"
+
+// Floating point numbers
+"\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+
+// Hexadecimal numbers
+"\\b0[xX][0-9a-fA-F]+\\b"
+```
+
+## Complete Example: Adding Lua Support
+
+Here's a complete example adding Lua language support:
+
+### 1. In language.h:
+```c
+typedef enum {
+    // ... existing types ...
+    FT_LUA,
+} FileType;
+```
+
+### 2. In language.c:
+```c
+// Lua
+if (strcmp(ext, "lua") == 0)
+    return FT_LUA;
+```
+
+### 3. In highlight.c:
+```c
+// ============================================================================
+// Lua Highlight Rules
+// ============================================================================
+
+static HighlightRule lua_rules[] = {
+    // Line comments
+    { "--.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Strings
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(and|break|do|else|elseif|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in functions
+    { "\\b(print|type|tonumber|tostring|pairs|ipairs|next|select|unpack|rawget|rawset|setmetatable|getmetatable|require|dofile|loadfile|pcall|xpcall|error|assert)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers
+    { "\\b[0-9]+\\.[0-9]*([eE][+-]?[0-9]+)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[xX][0-9a-fA-F]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter lua_highlighter = {
+    .ft = FT_LUA,
+    .rules = lua_rules,
+    .rule_count = sizeof(lua_rules) / sizeof(lua_rules[0]),
+    .block_comment_start = "--[[",
+    .block_comment_end = "]]"
+};
+
+// Add to all_highlighters array:
+static LanguageHighlighter *all_highlighters[] = {
+    &c_highlighter,
+    &cpp_highlighter,
+    &lua_highlighter,
+};
+```
+
+## Testing Your Rules
+
+1. Compile JSVIM with your changes
+2. Open a file with your language's extension
+3. Check that:
+   - Keywords are highlighted correctly
+   - Strings are highlighted (including escaped characters)
+   - Comments are highlighted (both line and block)
+   - Numbers are highlighted
+   - No false positives (keywords inside strings shouldn't be highlighted)
+
+## Troubleshooting
+
+- **Pattern not matching**: Check regex escaping (double backslashes in C strings)
+- **Wrong tokens highlighted**: Check rule order - put specific patterns before general ones
+- **Block comments not working**: Ensure `block_comment_start` and `block_comment_end` are set
+- **Compilation errors**: Make sure all struct fields are initialized
+
+---
+
+# Adding LSP Support for a Language
+
+To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features, follow these steps.
+
+## Overview
+
+JSVIM's LSP integration works as follows:
+1. When a file is opened, JSVIM checks if an LSP server is configured for that file type
+2. If configured, it spawns the LSP server process and communicates via stdin/stdout
+3. The LSP provides semantic tokens that layer on top of regex-based highlighting
+4. LSP tokens take priority over regex tokens for more accurate highlighting
+
+## Step 1: Add LSP Command Configuration
+
+In [lsp.c](lsp.c), add an entry to the `LSP_CMDS` array. This array maps `FileType` values to the command used to start the LSP server:
+
+```c
+static const LspCmd LSP_CMDS[] = {
+    [FT_NONE] = { { NULL } },
+    [FT_C] = {
+        { "clangd", NULL }
+    },
+    [FT_CPP] = {
+        { "clangd", NULL }
+    },
+    [FT_PYTHON] = {
+        { "pyright-langserver", "--stdio", NULL }
+    },
+    [FT_TS] = {
+        { "typescript-language-server", "--stdio", NULL }
+    },
+    [FT_JS] = {
+        { "typescript-language-server", "--stdio", NULL }
+    },
+    // Add your language here:
+    [FT_RUBY] = {
+        { "solargraph", "stdio", NULL }
+    },
+};
+```
+
+### LspCmd Structure
+
+The `LspCmd` structure is defined in [lsp.h](lsp.h):
+
+```c
+typedef struct {
+    const char *argv[8];  // NULL-terminated argument array
+} LspCmd;
+```
+
+- The first element is the executable name
+- Subsequent elements are command-line arguments
+- The array **must** be NULL-terminated
+- Maximum 8 elements (including NULL terminator)
+
+### Common LSP Servers
+
+| Language   | LSP Server | Command |
+|------------|------------|---------|
+| C/C++      | clangd     | `{ "clangd", NULL }` |
+| Python     | pyright    | `{ "pyright-langserver", "--stdio", NULL }` |
+| Python     | pylsp      | `{ "pylsp", NULL }` |
+| JavaScript/TypeScript | typescript-language-server | `{ "typescript-language-server", "--stdio", NULL }` |
+| Rust       | rust-analyzer | `{ "rust-analyzer", NULL }` |
+| Go         | gopls      | `{ "gopls", NULL }` |
+| Ruby       | solargraph | `{ "solargraph", "stdio", NULL }` |
+| Java       | jdtls      | `{ "jdtls", NULL }` |
+| Lua        | lua-language-server | `{ "lua-language-server", NULL }` |
+
+## Step 2: Enable LSP Spawning in main.c
+
+In [main.c](main.c), the LSP is spawned for specific file types. Add your language to the condition:
+
+```c
+// Then try to start LSP for deep semantic highlighting (layered on top)
+if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP || ed.buf.ft == FT_RUBY) {
+    ed.buf.lsp = spawn_lsp(&ed.buf.ft);
+    if (ed.buf.lsp.pid > 0) {
+        lsp_initialize(&ed.buf);
+    }
+}
+```
+
+## Step 3: Set the Language ID (Optional)
+
+Some LSP servers require a specific `languageId` in the `textDocument/didOpen` notification. In [lsp.c](lsp.c), the `lsp_notify_did_open()` function currently hardcodes `"c"`:
+
+```c
+cJSON_AddStringToObject(td, "languageId", "c");
+```
+
+For proper multi-language support, you may want to modify this to use the correct language ID based on file type:
+
+```c
+const char* get_language_id(FileType ft) {
+    switch (ft) {
+        case FT_C:      return "c";
+        case FT_CPP:    return "cpp";
+        case FT_PYTHON: return "python";
+        case FT_JS:     return "javascript";
+        case FT_TS:     return "typescript";
+        case FT_RUBY:   return "ruby";
+        case FT_RUST:   return "rust";
+        case FT_GO:     return "go";
+        case FT_LUA:    return "lua";
+        default:        return "plaintext";
+    }
+}
+
+// In lsp_notify_did_open():
+cJSON_AddStringToObject(td, "languageId", get_language_id(buf->ft));
+```
+
+## LSP Protocol Details
+
+### Initialization Flow
+
+1. **spawn_lsp()** - Forks and executes the LSP server, sets up stdin/stdout pipes
+2. **lsp_initialize()** - Sends the `initialize` request with client capabilities
+3. Server responds with its capabilities (including semantic token legend)
+4. Client sends `initialized` notification
+5. **lsp_notify_did_open()** - Sends `textDocument/didOpen` with file contents
+6. **lsp_request_semantic_tokens()** - Requests semantic tokens for highlighting
+
+### Message Format
+
+LSP uses JSON-RPC 2.0 with HTTP-like headers:
+
+```
+Content-Length: 123\r\n
+\r\n
+{"jsonrpc":"2.0","method":"...","params":{...}}
+```
+
+### Key Functions in lsp.c
+
+| Function | Purpose |
+|----------|---------|
+| `spawn_lsp()` | Fork and exec LSP server process |
+| `stop_lsp()` | Terminate LSP server |
+| `lsp_send()` | Send JSON-RPC message with headers |
+| `lsp_initialize()` | Send initialize request |
+| `lsp_notify_did_open()` | Notify server that file is open |
+| `lsp_notify_did_change()` | Notify server of file changes |
+| `lsp_request_semantic_tokens()` | Request semantic tokens |
+| `try_parse_lsp_message()` | Parse incoming LSP messages |
+
+### Semantic Token Handling
+
+When the LSP responds to `textDocument/semanticTokens/full`, the tokens are parsed and stored in the buffer. The token type indices are mapped to `SemanticKind` values using the legend provided during initialization.
+
+In [semantic.c](semantic.c), the `semantic_kind_from_lsp()` function maps LSP token type strings to internal `SemanticKind` values:
+
+```c
+SemanticKind semantic_kind_from_lsp(const char *type) {
+    if (strcmp(type, "keyword") == 0)   return SEM_KEYWORD;
+    if (strcmp(type, "type") == 0)      return SEM_TYPE;
+    if (strcmp(type, "function") == 0)  return SEM_FUNCTION;
+    // ... etc
+}
+```
+
+## Complete Example: Adding Rust LSP Support
+
+### 1. In lsp.c, add to LSP_CMDS:
+```c
+[FT_RUST] = {
+    { "rust-analyzer", NULL }
+},
+```
+
+### 2. In main.c, enable LSP spawning:
+```c
+if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP || ed.buf.ft == FT_RUST) {
+    ed.buf.lsp = spawn_lsp(&ed.buf.ft);
+    if (ed.buf.lsp.pid > 0) {
+        lsp_initialize(&ed.buf);
+    }
+}
+```
+
+### 3. Ensure rust-analyzer is installed:
+```bash
+# Using rustup
+rustup component add rust-analyzer
+
+# Or download from releases
+# https://github.com/rust-lang/rust-analyzer/releases
+```
+
+## Debugging LSP Issues
+
+1. **LSP not starting**: Check if the LSP executable is in PATH
+2. **No semantic tokens**: Check if the server supports `textDocument/semanticTokens`
+3. **Wrong highlighting**: Check the token type mapping in `semantic_kind_from_lsp()`
+4. **Communication errors**: LSP stderr is redirected to `/dev/null` by default; modify `spawn_lsp()` to see errors
+
+To enable LSP debug output, you can temporarily remove the stderr redirection in `spawn_lsp()`:
+
+```c
+// Comment out these lines to see LSP errors:
+// int devnull = open("/dev/null", O_WRONLY);
+// if (devnull >= 0) {
+//     dup2(devnull, STDERR_FILENO);
+//     close(devnull);
+// }
+```
+
+---
+
+## License
+
+JSVIM is part of the JSSH project. See the main project LICENSE file for details.

@@ -57,10 +57,138 @@ static LanguageHighlighter cpp_highlighter = {
     .block_comment_end = "*/"
 };
 
+// ============================================================================
+// Python Highlight Rules
+// ============================================================================
+
+static HighlightRule python_rules[] = {
+    // Line comments
+    { "#.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Triple-quoted strings (must come before single-line strings)
+    { "\"\"\"([^\"]|\"[^\"]|\"\"[^\"])*\"\"\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    { "'''([^']|'[^']|''[^'])*'''", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // F-strings, raw strings, byte strings prefixes
+    { "[fFrRbBuU]+\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    { "[fFrRbBuU]+'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Regular strings
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in constants
+    { "\\b(True|False|None|Ellipsis|NotImplemented|__debug__)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in types
+    { "\\b(int|float|complex|str|bytes|bytearray|list|tuple|dict|set|frozenset|bool|object|type|range|slice|memoryview|super)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in functions
+    { "\\b(abs|all|any|ascii|bin|breakpoint|callable|chr|classmethod|compile|delattr|dir|divmod|enumerate|eval|exec|filter|format|getattr|globals|hasattr|hash|help|hex|id|input|isinstance|issubclass|iter|len|locals|map|max|min|next|oct|open|ord|pow|print|property|repr|reversed|round|setattr|sorted|staticmethod|sum|vars|zip|__import__)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in exceptions
+    { "\\b(BaseException|Exception|ArithmeticError|AssertionError|AttributeError|BlockingIOError|BrokenPipeError|BufferError|BytesWarning|ChildProcessError|ConnectionAbortedError|ConnectionError|ConnectionRefusedError|ConnectionResetError|DeprecationWarning|EOFError|EnvironmentError|FileExistsError|FileNotFoundError|FloatingPointError|FutureWarning|GeneratorExit|IOError|ImportError|ImportWarning|IndentationError|IndexError|InterruptedError|IsADirectoryError|KeyError|KeyboardInterrupt|LookupError|MemoryError|ModuleNotFoundError|NameError|NotADirectoryError|NotImplementedError|OSError|OverflowError|PendingDeprecationWarning|PermissionError|ProcessLookupError|RecursionError|ReferenceError|ResourceWarning|RuntimeError|RuntimeWarning|StopAsyncIteration|StopIteration|SyntaxError|SyntaxWarning|SystemError|SystemExit|TabError|TimeoutError|TypeError|UnboundLocalError|UnicodeDecodeError|UnicodeEncodeError|UnicodeError|UnicodeTranslateError|UnicodeWarning|UserWarning|ValueError|Warning|ZeroDivisionError)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Decorators
+    { "@[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // self and cls parameters
+    { "\\b(self|cls)\\b", SEM_PARAMETER, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers (hex, octal, binary, float, complex, decimal)
+    { "\\b0[xX][0-9a-fA-F_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[oO][0-7_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[bB][01_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?[jJ]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*[jJ]\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter python_highlighter = {
+    .ft = FT_PYTHON,
+    .rules = python_rules,
+    .rule_count = sizeof(python_rules) / sizeof(python_rules[0]),
+    .block_comment_start = NULL,  // Python uses triple quotes, handled by regex
+    .block_comment_end = NULL
+};
+
+// ============================================================================
+// Java Highlight Rules
+// ============================================================================
+
+static HighlightRule java_rules[] = {
+    // Line comments
+    { "//.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (double quotes)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Character literals (single quotes)
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Text blocks (triple double quotes - Java 15+)
+    { "\"\"\"([^\"]|\"[^\"]|\"\"[^\"])*\"\"\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(abstract|assert|break|case|catch|class|const|continue|default|do|else|enum|extends|final|finally|for|goto|if|implements|import|instanceof|interface|native|new|package|private|protected|public|return|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|volatile|while|yield)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Modern Java keywords (Java 9+)
+    { "\\b(exports|module|non-sealed|open|opens|permits|provides|record|requires|sealed|to|transitive|uses|var|with)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Primitive types
+    { "\\b(boolean|byte|char|double|float|int|long|short|void)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common wrapper and utility classes
+    { "\\b(Boolean|Byte|Character|Class|Double|Enum|Float|Integer|Long|Number|Object|Short|String|StringBuffer|StringBuilder|System|Thread|Throwable|Void)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Collection types
+    { "\\b(ArrayList|Collection|Collections|HashMap|HashSet|Hashtable|Iterator|LinkedHashMap|LinkedHashSet|LinkedList|List|Map|Queue|Set|Stack|TreeMap|TreeSet|Vector)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common exception types
+    { "\\b(Exception|RuntimeException|Error|Throwable|ArithmeticException|ArrayIndexOutOfBoundsException|ClassCastException|ClassNotFoundException|CloneNotSupportedException|IllegalArgumentException|IllegalStateException|IndexOutOfBoundsException|InterruptedException|IOException|NullPointerException|NumberFormatException|OutOfMemoryError|SecurityException|StackOverflowError|UnsupportedOperationException)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Boolean literals and null
+    { "\\b(true|false|null)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Annotations
+    { "@[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers (hex, binary, octal, float, long, decimal)
+    { "\\b0[xX][0-9a-fA-F_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[bB][01_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[0-7_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?[fFdD]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*[lLfFdD]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter java_highlighter = {
+    .ft = FT_JAVA,
+    .rules = java_rules,
+    .rule_count = sizeof(java_rules) / sizeof(java_rules[0]),
+    .block_comment_start = "/*",
+    .block_comment_end = "*/"
+};
+
 // Array of all highlighters
 static LanguageHighlighter *all_highlighters[] = {
     &c_highlighter,
     &cpp_highlighter,
+    &python_highlighter,
+    &java_highlighter,
 };
 static const size_t highlighter_count = sizeof(all_highlighters) / sizeof(all_highlighters[0]);
 

@@ -82,10 +82,12 @@ int main(int argc, char **argv) {
     highlight_buffer(&ed.buf);
 
     // Then try to start LSP for deep semantic highlighting (layered on top)
-    if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP) {
-        ed.buf.lsp = spawn_lsp();
+    if (ed.buf.ft != FT_NONE) {
+        ed.buf.lsp = spawn_lsp(&ed.buf.ft);
         if (ed.buf.lsp.pid > 0) {
             lsp_initialize(&ed.buf);
+        } else {
+            // failed to start LSP
         }
     }
 

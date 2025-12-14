@@ -8,6 +8,7 @@ typedef enum {
     FT_C,
     FT_CPP,
     FT_JS,
+    FT_TS,
     FT_PYTHON,
     FT_RUST,
     FT_GO,

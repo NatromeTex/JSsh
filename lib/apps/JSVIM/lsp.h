@@ -3,9 +3,15 @@
 #define LSP_H
 
 #include "buffer.h"
+#include "language.h"
+
+// LSP process commands
+typedef struct {
+    const char *argv[8];  // NULL-terminated
+} LspCmd;
 
 // Spawn LSP server process
-struct LSPProcess spawn_lsp(void);
+struct LSPProcess spawn_lsp(FileType *ft);
 
 // Stop LSP server process
 void stop_lsp(struct LSPProcess *p);

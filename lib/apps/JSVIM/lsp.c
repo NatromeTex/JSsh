@@ -3,6 +3,7 @@
 #include "buffer.h"
 #include "highlight.h"
 #include "cJSON.h"
+#include "language.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,6 +11,26 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
+
+
+static const LspCmd LSP_CMDS[] = {
+    [FT_NONE] = { { NULL } },
+    [FT_C] = {
+        { "clangd", NULL }
+    },
+    [FT_CPP] = {
+        { "clangd", NULL }
+    },
+    [FT_PYTHON] = {
+        { "pyright-langserver", "--stdio", NULL }
+    },
+    [FT_TS] = {
+        { "typescript-language-server", "--stdio", NULL }
+    },
+    [FT_JS] = {
+        { "typescript-language-server", "--stdio", NULL }
+    },
+};
 
 void lsp_send(struct LSPProcess *p, const char *json) {
     if (p->stdin_fd == -1) return;
@@ -521,7 +542,7 @@ int try_parse_lsp_message(Buffer *buf) {
     return 1; // message processed
 }
 
-struct LSPProcess spawn_lsp(void) {
+struct LSPProcess spawn_lsp(FileType *ft) {
     struct LSPProcess proc = {0};
 
     int in_pipe[2];   // parent writes → child reads (stdin)
@@ -555,16 +576,18 @@ struct LSPProcess spawn_lsp(void) {
         close(in_pipe[1]);
         close(out_pipe[0]);
 
-        int logfd = open("clangd.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (logfd >= 0) {
-            dup2(logfd, STDERR_FILENO);
-            close(logfd);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
         }
 
         setpgid(0, 0);
-        // testing with clangd, will later allow more options
-        execlp("clangd", "clangd", NULL);
-        perror("execlp clangd");
+
+        const char *const *cmd = LSP_CMDS[*ft].argv;
+        
+        execvp(cmd[0], (char *const *)cmd);
+        perror("execvp error");
         _exit(1);
     }
 
