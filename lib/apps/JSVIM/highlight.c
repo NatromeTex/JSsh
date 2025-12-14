@@ -183,12 +183,317 @@ static LanguageHighlighter java_highlighter = {
     .block_comment_end = "*/"
 };
 
+// ============================================================================
+// JavaScript/TypeScript Highlight Rules
+// ============================================================================
+
+static HighlightRule js_rules[] = {
+    // Line comments
+    { "//.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Template literals (backticks)
+    { "`([^`\\\\]|\\\\.)*`", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (double quotes)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (single quotes)
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|function|if|import|in|instanceof|let|new|of|return|static|super|switch|this|throw|try|typeof|var|void|while|with|yield)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // TypeScript keywords
+    { "\\b(abstract|as|asserts|declare|enum|get|implements|infer|interface|is|keyof|module|namespace|never|override|private|protected|public|readonly|require|set|type|unknown)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Boolean literals and null/undefined
+    { "\\b(true|false|null|undefined|NaN|Infinity)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in types (TypeScript)
+    { "\\b(any|boolean|bigint|number|object|string|symbol|void|never|unknown)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in objects and constructors
+    { "\\b(Array|Boolean|Date|Error|Function|JSON|Map|Math|Number|Object|Promise|Proxy|Reflect|RegExp|Set|String|Symbol|WeakMap|WeakSet|BigInt|ArrayBuffer|DataView|Float32Array|Float64Array|Int8Array|Int16Array|Int32Array|Uint8Array|Uint16Array|Uint32Array|Uint8ClampedArray)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Console methods
+    { "\\b(console)\\b", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common global functions
+    { "\\b(alert|confirm|prompt|setTimeout|setInterval|clearTimeout|clearInterval|fetch|require|module|exports)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Decorators (TypeScript/ES7)
+    { "@[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers (hex, binary, octal, float, bigint, decimal)
+    { "\\b0[xX][0-9a-fA-F_]+n?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[bB][01_]+n?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[oO][0-7_]+n?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*n\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter js_highlighter = {
+    .ft = FT_JS,
+    .rules = js_rules,
+    .rule_count = sizeof(js_rules) / sizeof(js_rules[0]),
+    .block_comment_start = "/*",
+    .block_comment_end = "*/"
+};
+
+static LanguageHighlighter ts_highlighter = {
+    .ft = FT_TS,
+    .rules = js_rules,  // Reuse JS rules (includes TS keywords)
+    .rule_count = sizeof(js_rules) / sizeof(js_rules[0]),
+    .block_comment_start = "/*",
+    .block_comment_end = "*/"
+};
+
+// ============================================================================
+// Go Highlight Rules
+// ============================================================================
+
+static HighlightRule go_rules[] = {
+    // Line comments
+    { "//.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Raw string literals (backticks)
+    { "`[^`]*`", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (double quotes)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Rune literals (single quotes)
+    { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(break|case|chan|const|continue|default|defer|else|fallthrough|for|func|go|goto|if|import|interface|map|package|range|return|select|struct|switch|type|var)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in constants
+    { "\\b(true|false|nil|iota)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in types
+    { "\\b(bool|byte|complex64|complex128|error|float32|float64|int|int8|int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr|any|comparable)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Built-in functions
+    { "\\b(append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers (hex, binary, octal, float, imaginary, decimal)
+    { "\\b0[xX][0-9a-fA-F_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[bB][01_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[oO]?[0-7_]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?i?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*i\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter go_highlighter = {
+    .ft = FT_GO,
+    .rules = go_rules,
+    .rule_count = sizeof(go_rules) / sizeof(go_rules[0]),
+    .block_comment_start = "/*",
+    .block_comment_end = "*/"
+};
+
+// ============================================================================
+// Rust Highlight Rules
+// ============================================================================
+
+static HighlightRule rust_rules[] = {
+    // Line comments (including doc comments)
+    { "///.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    { "//!.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    { "//.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Raw string literals
+    { "r#*\"[^\"]*\"#*", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // String literals (double quotes)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Character literals
+    { "'([^'\\\\]|\\\\.)'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Byte string literals
+    { "b\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Byte literals
+    { "b'([^'\\\\]|\\\\.)'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(as|async|await|break|const|continue|crate|dyn|else|enum|extern|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|type|union|unsafe|use|where|while)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Reserved keywords
+    { "\\b(abstract|become|box|do|final|macro|override|priv|try|typeof|unsized|virtual|yield)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Boolean and special values
+    { "\\b(true|false)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Primitive types
+    { "\\b(bool|char|str|u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f32|f64)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common standard library types
+    { "\\b(Box|Cell|Cow|Option|Pin|Rc|RefCell|Result|String|Vec|Arc|Mutex|RwLock|HashMap|HashSet|BTreeMap|BTreeSet|VecDeque|LinkedList|BinaryHeap)\\b",
+      SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Option/Result variants
+    { "\\b(Some|None|Ok|Err)\\b", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common macros
+    { "\\b(println|print|eprintln|eprint|format|panic|assert|assert_eq|assert_ne|debug_assert|debug_assert_eq|debug_assert_ne|todo|unimplemented|unreachable|vec|cfg|include|include_str|include_bytes|env|concat|stringify|line|column|file|module_path)!", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Attributes
+    { "#!?\\[[^\\]]*\\]", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Lifetimes
+    { "'[a-zA-Z_][a-zA-Z0-9_]*", SEM_PARAMETER, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers (hex, binary, octal, float, decimal with type suffix)
+    { "\\b0[xX][0-9a-fA-F_]+([ui](8|16|32|64|128|size))?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[bB][01_]+([ui](8|16|32|64|128|size))?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b0[oO][0-7_]+([ui](8|16|32|64|128|size))?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+    { "\\b[0-9][0-9_]*([ui](8|16|32|64|128|size)|f32|f64)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter rust_highlighter = {
+    .ft = FT_RUST,
+    .rules = rust_rules,
+    .rule_count = sizeof(rust_rules) / sizeof(rust_rules[0]),
+    .block_comment_start = "/*",
+    .block_comment_end = "*/"
+};
+
+// ============================================================================
+// Shell (Bash) Highlight Rules
+// ============================================================================
+
+static HighlightRule sh_rules[] = {
+    // Comments
+    { "#.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Here-doc markers (basic)
+    { "<<-?['\"]?[a-zA-Z_][a-zA-Z0-9_]*['\"]?", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Double-quoted strings (with variable expansion)
+    { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Single-quoted strings (literal)
+    { "'[^']*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // $'...' ANSI-C quoting
+    { "\\$'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Keywords
+    { "\\b(if|then|else|elif|fi|case|esac|for|while|until|do|done|in|function|select|time|coproc)\\b",
+      SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Shell built-ins
+    { "\\b(alias|bg|bind|break|builtin|caller|cd|command|compgen|complete|compopt|continue|declare|dirs|disown|echo|enable|eval|exec|exit|export|false|fc|fg|getopts|hash|help|history|jobs|kill|let|local|logout|mapfile|popd|printf|pushd|pwd|read|readarray|readonly|return|set|shift|shopt|source|suspend|test|times|trap|true|type|typeset|ulimit|umask|unalias|unset|wait)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Common commands
+    { "\\b(awk|cat|chmod|chown|cp|curl|cut|diff|find|grep|head|less|ln|ls|mkdir|mv|rm|rmdir|sed|sort|tail|tar|tee|touch|tr|uniq|wc|wget|xargs)\\b",
+      SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Variables ($ prefixed)
+    { "\\$\\{?[a-zA-Z_][a-zA-Z0-9_]*\\}?", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    { "\\$\\{?[0-9]+\\}?", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    { "\\$[\\$\\?\\!\\#\\*\\@\\-]", SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Shebang
+    { "^#!.*$", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Numbers
+    { "\\b[0-9]+\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter sh_highlighter = {
+    .ft = FT_SH,
+    .rules = sh_rules,
+    .rule_count = sizeof(sh_rules) / sizeof(sh_rules[0]),
+    .block_comment_start = NULL,
+    .block_comment_end = NULL
+};
+
+// ============================================================================
+// Markdown Highlight Rules
+// ============================================================================
+
+static HighlightRule markdown_rules[] = {
+    // Headers (ATX style)
+    { "^#{1,6}[ \t].*$", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Bold text (**text** or __text__)
+    { "\\*\\*[^*]+\\*\\*", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    { "__[^_]+__", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+    
+    // Italic text (*text* or _text_)
+    { "\\*[^*]+\\*", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    { "_[^_]+_", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+    
+    // Inline code (`code`)
+    { "`[^`]+`", SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Code fence markers
+    { "^```.*$", SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+    
+    // Links [text](url) and ![alt](url)
+    { "!?\\[[^\\]]*\\]\\([^)]*\\)", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Reference links [text][ref]
+    { "\\[[^\\]]*\\]\\[[^\\]]*\\]", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Reference definitions [ref]: url
+    { "^\\[[^\\]]+\\]:[ \t]+.*$", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+    
+    // Blockquotes
+    { "^>+.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Horizontal rules
+    { "^(\\*{3,}|-{3,}|_{3,})[ \t]*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+    
+    // Unordered list markers
+    { "^[ \t]*[\\*\\-\\+][ \t]", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // Ordered list markers
+    { "^[ \t]*[0-9]+\\.[ \t]", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+    
+    // HTML comments
+    { "<!--.*-->", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+};
+
+static LanguageHighlighter markdown_highlighter = {
+    .ft = FT_MARKDOWN,
+    .rules = markdown_rules,
+    .rule_count = sizeof(markdown_rules) / sizeof(markdown_rules[0]),
+    .block_comment_start = NULL,
+    .block_comment_end = NULL
+};
+
 // Array of all highlighters
 static LanguageHighlighter *all_highlighters[] = {
     &c_highlighter,
     &cpp_highlighter,
     &python_highlighter,
     &java_highlighter,
+    &js_highlighter,
+    &ts_highlighter,
+    &go_highlighter,
+    &rust_highlighter,
+    &sh_highlighter,
+    &markdown_highlighter,
 };
 static const size_t highlighter_count = sizeof(all_highlighters) / sizeof(all_highlighters[0]);
 

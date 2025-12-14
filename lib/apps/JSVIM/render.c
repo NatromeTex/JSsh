@@ -21,17 +21,16 @@ void render_cleanup(void) {
 }
 
 void render_init_colors(void) {
-    init_pair(COLOR_PAIR_TEXT, COLOR_WHITE, COLOR_BLACK);
-    init_pair(COLOR_PAIR_STATUS, COLOR_BLACK, 248);              // status bar 
-    init_pair(COLOR_PAIR_GUTTER, 8, COLOR_BLACK);                // gutter (gray on black)
-    init_pair(COLOR_PAIR_ERROR, 196, COLOR_BLACK);               // errors
-    init_pair(COLOR_PAIR_WARNING, 226, COLOR_BLACK);             // warnings
-    init_pair(SY_KEYWORD,  COLOR_BLUE,    COLOR_BLACK);          // keywords 
-    init_pair(SY_TYPE,     COLOR_CYAN,    COLOR_BLACK);          // types
-    init_pair(SY_FUNCTION, COLOR_YELLOW,  COLOR_BLACK);          // functions
-    init_pair(SY_STRING,   127,   COLOR_BLACK);                  // strings
-    init_pair(SY_NUMBER,   127, COLOR_BLACK);                    // numbers
-    init_pair(SY_COMMENT,  34,   COLOR_BLACK);                   // comments
+    init_pair(COLOR_PAIR_TEXT, -1, -1);
+    init_pair(COLOR_PAIR_GUTTER, 8, -1);                // gutter (gray on black)
+    init_pair(COLOR_PAIR_ERROR, 196, -1);               // errors
+    init_pair(COLOR_PAIR_WARNING, 226, -1);             // warnings
+    init_pair(SY_KEYWORD,  COLOR_BLUE,    -1);          // keywords 
+    init_pair(SY_TYPE,     COLOR_CYAN,    -1);          // types
+    init_pair(SY_FUNCTION, COLOR_YELLOW,  -1);          // functions
+    init_pair(SY_STRING,   127,   -1);                  // strings
+    init_pair(SY_NUMBER,   127, -1);                    // numbers
+    init_pair(SY_COMMENT,  34,   -1);                   // comments
 }
 
 int compute_gutter_width(size_t line_count) {
@@ -140,12 +139,12 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
     }
 
     // status bar background -> now at maxy-2
-    wattron(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    wattron(main_win, A_REVERSE);
     for (int i = 1; i < maxx - 1; i++) mvwaddch(main_win, maxy - 2, i, ' ');
-    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    wattroff(main_win, A_REVERSE);
 
     // status content: filename (truncated), mode, modified, clock
-    wattron(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    wattron(main_win, A_REVERSE);
     char status_left[256];
     if (have_filename) {
         char fname_short[240];
@@ -166,7 +165,7 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
     char tbuf[6];
     strftime(tbuf, sizeof(tbuf), "%H:%M", tm_info);
     mvwprintw(main_win, maxy - 2, maxx - 1 - (int)strlen(tbuf) - 1, "%s", tbuf);
-    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    wattroff(main_win, A_REVERSE);
 }
 
 void render_command_window(WINDOW *cmd_win, Buffer *buf,
