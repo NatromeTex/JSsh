@@ -25,6 +25,8 @@ typedef struct {
     int quit;
     int force_quit;
     int line_number_relative;  // 0 = absolute, 1 = relative
+    int file_created;          // 1 if file exists or user confirmed creation
+    int pending_create_prompt; // 1 if waiting for user to confirm file creation
 } EditorState;
 
 // Initialize editor state

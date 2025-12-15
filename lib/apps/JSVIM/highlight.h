@@ -14,6 +14,14 @@
 #define SY_STRING   13
 #define SY_NUMBER   14
 #define SY_COMMENT  15
+#define SY_OPERATOR 16
+#define SY_MACRO    17
+#define SY_CLASS    18
+#define SY_ENUM     19
+#define SY_NAMESPACE 20
+#define SY_VARIABLE 21
+#define SY_PARAMETER 22
+#define SY_PROPERTY 23
 
 // Highlight rule flags
 #define HL_FLAG_NONE        0

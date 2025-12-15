@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.1.2\"
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.2.4\"
 LDFLAGS = -lm -ldl -lreadline -lncurses -lssh -lgit2
 
 # core sources
@@ -109,7 +109,7 @@ JSVIM_SRC = lib/apps/JSVIM/main.c \
 ifeq ($(APPS_ENABLED),yes)
 bin/jsvim: $(JSVIM_SRC)
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -I./lib/apps/JSVIM $(JSVIM_SRC) -lncurses -o bin/jsvim
+	$(CC) $(CFLAGS) -I./lib/apps/JSVIM $(JSVIM_SRC) -lncursesw -o bin/jsvim
 endif
 
 

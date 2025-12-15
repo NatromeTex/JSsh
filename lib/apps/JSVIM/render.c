@@ -23,14 +23,23 @@ void render_cleanup(void) {
 void render_init_colors(void) {
     init_pair(COLOR_PAIR_TEXT, -1, -1);
     init_pair(COLOR_PAIR_GUTTER, 8, -1);                // gutter (gray on black)
+    init_pair(COLOR_PAIR_STATUS, COLOR_BLACK, 7); // status bar
     init_pair(COLOR_PAIR_ERROR, 196, -1);               // errors
     init_pair(COLOR_PAIR_WARNING, 226, -1);             // warnings
     init_pair(SY_KEYWORD,  COLOR_BLUE,    -1);          // keywords 
     init_pair(SY_TYPE,     COLOR_CYAN,    -1);          // types
     init_pair(SY_FUNCTION, COLOR_YELLOW,  -1);          // functions
     init_pair(SY_STRING,   127,   -1);                  // strings
-    init_pair(SY_NUMBER,   127, -1);                    // numbers
+    init_pair(SY_NUMBER,   14, -1);                    // numbers
     init_pair(SY_COMMENT,  34,   -1);                   // comments
+    init_pair(SY_OPERATOR,  COLOR_WHITE,  -1);   // operators stand out, neutral
+    init_pair(SY_MACRO,     COLOR_MAGENTA,-1);   // annotations
+    init_pair(SY_CLASS,     COLOR_GREEN,  -1);   // class / enum names
+    init_pair(SY_ENUM,      COLOR_GREEN,  -1);   // same as class
+    init_pair(SY_NAMESPACE, 66,            -1);  // packages (muted blue)
+    init_pair(SY_VARIABLE, COLOR_WHITE,   -1);   // default identifiers
+    init_pair(SY_PARAMETER, 180,           -1);  // subtle yellow
+    init_pair(SY_PROPERTY,  110,           -1);  // muted cyan
 }
 
 int compute_gutter_width(size_t line_count) {
@@ -139,12 +148,12 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
     }
 
     // status bar background -> now at maxy-2
-    wattron(main_win, A_REVERSE);
+    wattron(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
     for (int i = 1; i < maxx - 1; i++) mvwaddch(main_win, maxy - 2, i, ' ');
-    wattroff(main_win, A_REVERSE);
+    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
 
     // status content: filename (truncated), mode, modified, clock
-    wattron(main_win, A_REVERSE);
+    wattron(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
     char status_left[256];
     if (have_filename) {
         char fname_short[240];
@@ -157,7 +166,7 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
         snprintf(status_left, sizeof(status_left), "[No Name]%s", mod_suffix);
     }
     const char *mode_str = mode_insert ? "-- INSERT --" : "-- COMMAND --";
-    mvwprintw(main_win, maxy - 2, 2, "%s %s [diags:%zu]", status_left, mode_str, buf->diag_count);
+    mvwprintw(main_win, maxy - 2, 2, "%s %s", status_left, mode_str);
 
     // clock
     time_t now = time(NULL);
@@ -165,18 +174,27 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
     char tbuf[6];
     strftime(tbuf, sizeof(tbuf), "%H:%M", tm_info);
     mvwprintw(main_win, maxy - 2, maxx - 1 - (int)strlen(tbuf) - 1, "%s", tbuf);
-    wattroff(main_win, A_REVERSE);
+    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
 }
 
 void render_command_window(WINDOW *cmd_win, Buffer *buf,
                           int maxx, int mode_insert,
-                          const char *cmdbuf, size_t cursor_line) {
+                          const char *cmdbuf, size_t cursor_line,
+                          int pending_create_prompt, const char *filename) {
     werase(cmd_win);
     
     // command row background
     wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_TEXT));
     for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
     wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+
+    // Show create prompt if pending
+    if (pending_create_prompt) {
+        wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+        mvwprintw(cmd_win, 0, 1, "Create %s? (Y/n): ", filename);
+        wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+        return;
+    }
 
     if (!mode_insert) {
         wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_TEXT));

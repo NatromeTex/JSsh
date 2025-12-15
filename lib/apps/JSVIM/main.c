@@ -17,6 +17,13 @@
 #include "lsp.h"
 #include "highlight.h"
 
+#ifndef JSVIM_VERSION
+#define JSVIM_VERSION "0.2.4"
+#endif
+#ifndef JSSH_VERSION
+#define JSSH_VERSION "unknown"
+#endif
+
 int main(int argc, char **argv) {
     EditorState ed;
     editor_init(&ed);
@@ -31,6 +38,15 @@ int main(int argc, char **argv) {
             strncpy(ed.filename, argv[1], sizeof(ed.filename)-1);
             ed.have_filename = 1;
             ed.existing_file = !load_file(&ed.buf, ed.filename);
+            if (!ed.existing_file) {
+                // file didn't exist; start with empty buffer, prompt user
+                buf_push(&ed.buf, dupstr(""));
+                ed.file_created = 0;
+                ed.mode_insert = 0;  // Stay in command mode until file is created
+                ed.pending_create_prompt = 1;  // Show create prompt
+            } else {
+                ed.file_created = 1;
+            }
         }
     } else {
         // start with an empty buffer
@@ -65,10 +81,15 @@ int main(int argc, char **argv) {
             ed.have_filename = 1;
             ed.existing_file = !load_file(&ed.buf, ed.filename);
             if (!ed.existing_file) {
-                // file didn't exist; start with empty buffer but filename set
+                // file didn't exist; start with empty buffer, prompt user
                 buf_free(&ed.buf);
                 buf_init(&ed.buf);
                 buf_push(&ed.buf, dupstr(""));
+                ed.file_created = 0;
+                ed.mode_insert = 0;  // Stay in command mode until file is created
+                ed.pending_create_prompt = 1;  // Show create prompt
+            } else {
+                ed.file_created = 1;
             }
         }
     }
@@ -129,7 +150,8 @@ int main(int argc, char **argv) {
                           ed.modified, ed.mode_insert, ed.line_number_relative);
 
         render_command_window(cmd_win, &ed.buf, maxx, ed.mode_insert,
-                             ed.cmdbuf, ed.cursor_line);
+                             ed.cmdbuf, ed.cursor_line,
+                             ed.pending_create_prompt, ed.filename);
 
         // Position cursor and get input
         if (ed.mode_insert) {
@@ -143,7 +165,11 @@ int main(int argc, char **argv) {
             editor_handle_insert_mode(&ed, ch, visible_rows);
         } else {
             // place cursor in command window
-            wmove(cmd_win, 0, (int)ed.cmdlen + 2);
+            if (ed.pending_create_prompt) {
+                wmove(cmd_win, 0, 1 + 8 + (int)strlen(ed.filename) + 8);
+            } else {
+                wmove(cmd_win, 0, (int)ed.cmdlen + 2);
+            }
             wrefresh(main_win);
             wrefresh(cmd_win);
             ch = wgetch(cmd_win);

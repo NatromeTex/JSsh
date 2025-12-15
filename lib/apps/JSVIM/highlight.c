@@ -125,55 +125,95 @@ static LanguageHighlighter python_highlighter = {
 // ============================================================================
 
 static HighlightRule java_rules[] = {
+
+    // Block comments (/* ... */ and /** ... */)
+    { "/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
+
     // Line comments
     { "//.*$", SEM_COMMENT, HL_FLAG_NONE, {0}, 0 },
-    
-    // String literals (double quotes)
+
+    // Requires DOTALL or equivalent
+    { "\"\"\"[\\s\\S]*?\"\"\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
+
+    // String literals
     { "\"([^\"\\\\]|\\\\.)*\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
-    
-    // Character literals (single quotes)
+
+    // Character literals
     { "'([^'\\\\]|\\\\.)*'", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
-    
-    // Text blocks (triple double quotes - Java 15+)
-    { "\"\"\"([^\"]|\"[^\"]|\"\"[^\"])*\"\"\"", SEM_STRING, HL_FLAG_NONE, {0}, 0 },
-    
-    // Keywords
-    { "\\b(abstract|assert|break|case|catch|class|const|continue|default|do|else|enum|extends|final|finally|for|goto|if|implements|import|instanceof|interface|native|new|package|private|protected|public|return|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|volatile|while|yield)\\b",
+
+    // Annotations with optional arguments
+    { "@[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*(?:\\s*\\([^)]*\\))?",
+      SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
+
+    // Core keywords
+    { "\\b(abstract|assert|break|case|catch|class|continue|default|do|else|enum|extends|final|finally|for|if|implements|import|instanceof|interface|native|new|package|private|protected|public|return|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|volatile|while|yield)\\b",
       SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
-    
-    // Modern Java keywords (Java 9+)
-    { "\\b(exports|module|non-sealed|open|opens|permits|provides|record|requires|sealed|to|transitive|uses|var|with)\\b",
+
+    // Module / modern keywords
+    { "\\b(exports|module|open|opens|permits|provides|record|requires|sealed|to|transitive|uses|with)\\b",
       SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
-    
+
+    // Boolean literals and null
+    { "\\b(true|false|null)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
+
     // Primitive types
     { "\\b(boolean|byte|char|double|float|int|long|short|void)\\b",
       SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
-    
-    // Common wrapper and utility classes
+
+    // var (restricted type name)
+    { "\\bvar\\b", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+
+    // Common core classes
     { "\\b(Boolean|Byte|Character|Class|Double|Enum|Float|Integer|Long|Number|Object|Short|String|StringBuffer|StringBuilder|System|Thread|Throwable|Void)\\b",
       SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
-    
-    // Collection types
+
+    // Collections
     { "\\b(ArrayList|Collection|Collections|HashMap|HashSet|Hashtable|Iterator|LinkedHashMap|LinkedHashSet|LinkedList|List|Map|Queue|Set|Stack|TreeMap|TreeSet|Vector)\\b",
       SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
-    
-    // Common exception types
-    { "\\b(Exception|RuntimeException|Error|Throwable|ArithmeticException|ArrayIndexOutOfBoundsException|ClassCastException|ClassNotFoundException|CloneNotSupportedException|IllegalArgumentException|IllegalStateException|IndexOutOfBoundsException|InterruptedException|IOException|NullPointerException|NumberFormatException|OutOfMemoryError|SecurityException|StackOverflowError|UnsupportedOperationException)\\b",
+
+    // Exceptions
+    { "\\b(Exception|RuntimeException|Error|Throwable|IOException|NullPointerException|IllegalArgumentException|IllegalStateException|IndexOutOfBoundsException|InterruptedException|UnsupportedOperationException)\\b",
       SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
-    
-    // Boolean literals and null
-    { "\\b(true|false|null)\\b", SEM_KEYWORD, HL_FLAG_NONE, {0}, 0 },
-    
-    // Annotations
-    { "@[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)*", SEM_MACRO, HL_FLAG_NONE, {0}, 0 },
-    
-    // Numbers (hex, binary, octal, float, long, decimal)
+
+    // Class literals (Foo.class, int.class)
+    { "\\b[A-Za-z_][A-Za-z0-9_]*\\.class\\b", SEM_TYPE, HL_FLAG_NONE, {0}, 0 },
+
+    // Class / interface / enum / record declarations
+    { "\\b(class|interface|enum|record)\\s+[A-Za-z_][A-Za-z0-9_]*",
+      SEM_CLASS, HL_FLAG_NONE, {0}, 0 },
+
+    // Method calls and declarations
+    { "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()", SEM_FUNCTION, HL_FLAG_NONE, {0}, 0 },
+
+    // Parameters (best-effort)
+    { "\\b[A-Za-z_][A-Za-z0-9_]*\\s+[A-Za-z_][A-Za-z0-9_]*(?=\\s*[,)])",
+      SEM_PARAMETER, HL_FLAG_NONE, {0}, 0 },
+
+    // Variable declarations (best-effort)
+    { "\\b[A-Za-z_][A-Za-z0-9_]*\\s+[A-Za-z_][A-Za-z0-9_]*\\b",
+      SEM_VARIABLE, HL_FLAG_NONE, {0}, 0 },
+
+    // Hex
     { "\\b0[xX][0-9a-fA-F_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Binary
     { "\\b0[bB][01_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Octal
     { "\\b0[0-7_]+[lL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
-    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?[fFdD]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Floating point
+    { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?[fFdD]?\\b",
+      SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Decimal / integer
     { "\\b[0-9][0-9_]*[lLfFdD]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Operators
+    { "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<=|>>=|>>>=|<<|>>>|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|<|>|!|~|\\+|-|\\*|/|%|&|\\||\\^|\\?|:|::)",
+      SEM_OPERATOR, HL_FLAG_NONE, {0}, 0 },
 };
+
 
 static LanguageHighlighter java_highlighter = {
     .ft = FT_JAVA,

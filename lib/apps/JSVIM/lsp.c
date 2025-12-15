@@ -32,6 +32,26 @@ static const LspCmd LSP_CMDS[] = {
     },
 };
 
+// Map FileType to LSP languageId string
+static const char *lsp_language_id(FileType ft) {
+    switch (ft) {
+        case FT_C:        return "c";
+        case FT_CPP:      return "cpp";
+        case FT_JS:       return "javascript";
+        case FT_TS:       return "typescript";
+        case FT_PYTHON:   return "python";
+        case FT_RUST:     return "rust";
+        case FT_GO:       return "go";
+        case FT_JAVA:     return "java";
+        case FT_SH:       return "shellscript";
+        case FT_MAKEFILE: return "makefile";
+        case FT_JSON:     return "json";
+        case FT_MARKDOWN: return "markdown";
+        case FT_NONE:     return "plaintext";
+        default:          return "plaintext";
+    }
+}
+
 void lsp_send(struct LSPProcess *p, const char *json) {
     if (p->stdin_fd == -1) return;
 
@@ -103,7 +123,7 @@ void lsp_notify_did_open(Buffer *buf) {
     cJSON_AddItemToObject(params, "textDocument", td);
 
     cJSON_AddStringToObject(td, "uri", buf->lsp_uri);
-    cJSON_AddStringToObject(td, "languageId", "c");
+    cJSON_AddStringToObject(td, "languageId", lsp_language_id(buf->ft));
     buf->lsp_version = 1;
     cJSON_AddNumberToObject(td, "version", buf->lsp_version);
     cJSON_AddStringToObject(td, "text", text);
@@ -253,8 +273,7 @@ void lsp_request_semantic_tokens(Buffer *buf) {
 static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
     cJSON *root = cJSON_Parse(json_text);
     if (!root) {
-        fprintf(stderr, "LSP: invalid JSON\n");
-        return;
+        return;  // silently ignore invalid JSON
     }
 
     // Common LSP fields
@@ -412,27 +431,13 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
             goto done;
         }
         
-        // window/logMessage — used for debugging
+        // window/logMessage — silently ignore (would corrupt ncurses display)
         if (strcmp(m, "window/logMessage") == 0) {
-            cJSON *params = cJSON_GetObjectItem(root, "params");
-            if (params) {
-                cJSON *msg = cJSON_GetObjectItem(params, "message");
-                if (msg && cJSON_IsString(msg)) {
-                    fprintf(stderr, "LSP log: %s\n", msg->valuestring);
-                }
-            }
             goto done;
         }
         
-        // window/showMessage        
+        // window/showMessage — silently ignore (would corrupt ncurses display)
         if (strcmp(m, "window/showMessage") == 0) {
-            cJSON *params = cJSON_GetObjectItem(root, "params");
-            if (params) {
-                cJSON *msg = cJSON_GetObjectItem(params, "message");
-                if (msg && cJSON_IsString(msg)) {
-                    fprintf(stderr, "LSP showMessage: %s\n", msg->valuestring);
-                }
-            }
             goto done;
         }
 

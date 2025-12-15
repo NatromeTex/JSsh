@@ -25,6 +25,8 @@ void editor_init(EditorState *ed) {
     ed->quit = 0;
     ed->force_quit = 0;
     ed->line_number_relative = 0;
+    ed->file_created = 0;
+    ed->pending_create_prompt = 0;
 }
 
 void editor_cleanup(EditorState *ed) {
@@ -90,6 +92,14 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                 }
             }
         }
+        break;
+    case KEY_HOME:
+        // Move cursor to beginning of line
+        ed->cursor_col = 0;
+        break;
+    case KEY_END:
+        // Move cursor to end of line
+        ed->cursor_col = strlen(buf->lines[ed->cursor_line]);
         break;
     case KEY_BACKSPACE:
     case 127:
@@ -172,9 +182,26 @@ void editor_handle_command_mode(EditorState *ed, int ch,
         return;
     }
     
+    // Handle create file prompt
+    if (ed->pending_create_prompt) {
+        if (ch == 'n' || ch == 'N') {
+            // User declined, quit
+            ed->quit = 1;
+        } else if (ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r') {
+            // User accepted
+            ed->pending_create_prompt = 0;
+            ed->file_created = 1;
+            ed->mode_insert = 1;  // Now allow insert mode
+        }
+        // Ignore other keys while prompt is showing
+        return;
+    }
+    
     if (ch == 27) {
-        // ESC in command mode -> back to insert
-        ed->mode_insert = 1;
+        // ESC in command mode -> back to insert (only if file is created)
+        if (ed->file_created) {
+            ed->mode_insert = 1;
+        }
         return;
     }
     
@@ -229,6 +256,7 @@ void editor_handle_command_mode(EditorState *ed, int ch,
                             if (save_file(buf, ed->filename) == 0) {
                                 ed->modified = 0;
                                 ed->existing_file = 1;
+                                ed->file_created = 1;
                             } else {
                                 // show error briefly
                                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
@@ -239,8 +267,10 @@ void editor_handle_command_mode(EditorState *ed, int ch,
                             }
                         }
                     } else {
-                        if (save_file(buf, ed->filename) == 0) ed->modified = 0;
-                        else {
+                        if (save_file(buf, ed->filename) == 0) {
+                            ed->modified = 0;
+                            ed->file_created = 1;
+                        } else {
                             wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                             for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
                             mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
@@ -289,6 +319,7 @@ void editor_handle_command_mode(EditorState *ed, int ch,
                             if (save_file(buf, ed->filename) == 0) {
                                 ed->modified = 0;
                                 ed->existing_file = 1;
+                                ed->file_created = 1;
                                 ed->quit = 1;
                             } else {
                                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
@@ -301,6 +332,7 @@ void editor_handle_command_mode(EditorState *ed, int ch,
                     } else {
                         if (save_file(buf, ed->filename) == 0) {
                             ed->modified = 0;
+                            ed->file_created = 1;
                             ed->quit = 1;
                         } else {
                             wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));

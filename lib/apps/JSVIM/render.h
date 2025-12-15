@@ -11,6 +11,9 @@
 #define COLOR_PAIR_GUTTER   3
 #define COLOR_PAIR_ERROR    4
 #define COLOR_PAIR_WARNING  5
+#define COLOR_PAIR_STATUS_MID    6   // middle section of status bar
+#define COLOR_PAIR_ARROW_LEFT    7   // left arrow transition
+#define COLOR_PAIR_ARROW_RIGHT   8   // right arrow transition
 
 // Initialize ncurses and colors
 void render_init(void);
@@ -32,7 +35,8 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
 // Render the command window
 void render_command_window(WINDOW *cmd_win, Buffer *buf,
                           int maxx, int mode_insert,
-                          const char *cmdbuf, size_t cursor_line);
+                          const char *cmdbuf, size_t cursor_line,
+                          int pending_create_prompt, const char *filename);
 
 // Compute cursor screen position
 void compute_cursor_position(Buffer *buf, size_t cursor_line, size_t cursor_col,
