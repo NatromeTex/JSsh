@@ -173,8 +173,7 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
     }
 }
 
-void editor_handle_command_mode(EditorState *ed, int ch,
-                                WINDOW *cmd_win, int maxx) {
+void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int maxx) {
     Buffer *buf = &ed->buf;
     
     if (ch == ERR) {
@@ -185,15 +184,12 @@ void editor_handle_command_mode(EditorState *ed, int ch,
     // Handle create file prompt
     if (ed->pending_create_prompt) {
         if (ch == 'n' || ch == 'N') {
-            // User declined, quit
             ed->quit = 1;
         } else if (ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r') {
-            // User accepted
             ed->pending_create_prompt = 0;
             ed->file_created = 1;
             ed->mode_insert = 1;  // Now allow insert mode
         }
-        // Ignore other keys while prompt is showing
         return;
     }
     
@@ -349,6 +345,20 @@ void editor_handle_command_mode(EditorState *ed, int ch,
             } else if (strcmp(ed->cmdbuf, "set nu") == 0) {
                 // set absolute line numbers
                 ed->line_number_relative = 0;
+            } else if (strncmp(ed->cmdbuf, "go ", 3) == 0) {
+                // go to line number: "go 100"
+                int line_num = atoi(ed->cmdbuf + 3);
+                if (line_num > 0) {
+                    // Convert to 0-based index
+                    size_t target = (size_t)(line_num - 1);
+                    if (target >= buf->count && buf->count > 0)
+                        target = buf->count - 1;
+                    ed->cursor_line = target;
+                    ed->cursor_col = 0;
+                    // Adjust scroll to show cursor
+                    if (ed->cursor_line < ed->scroll_y)
+                        ed->scroll_y = ed->cursor_line;
+                }
             } else {
                 // unknown command; show it briefly
                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
@@ -384,7 +394,51 @@ void editor_handle_command_mode(EditorState *ed, int ch,
         return;
     }
     
-    // ignore arrow keys in command mode
+    if (ch == KEY_UP){
+        // Find first digit in cmdbuf to parse amount
+        int amount = 0;
+        for (size_t i = 0; i < ed->cmdlen; i++) {
+            if (ed->cmdbuf[i] >= '0' && ed->cmdbuf[i] <= '9') {
+                amount = atoi(&ed->cmdbuf[i]);
+                break;
+            }
+        }
+        if (amount <= 0) amount = 1;  // default to 1 if empty/invalid
+        if (ed->cursor_line >= (size_t)amount)
+            ed->cursor_line -= amount;
+        else
+            ed->cursor_line = 0;
+        size_t len = strlen(buf->lines[ed->cursor_line]);
+        if (ed->cursor_col > len) ed->cursor_col = len;
+        if (ed->cursor_line < ed->scroll_y)
+            ed->scroll_y = ed->cursor_line;
+        // Clear cmdbuf after navigation
+        ed->cmdlen = 0;
+        ed->cmdbuf[0] = '\0';
+        ed->mode_insert = 1;
+        return;
+    } else if (ch == KEY_DOWN){
+        // Find first digit in cmdbuf to parse amount
+        int amount = 0;
+        for (size_t i = 0; i < ed->cmdlen; i++) {
+            if (ed->cmdbuf[i] >= '0' && ed->cmdbuf[i] <= '9') {
+                amount = atoi(&ed->cmdbuf[i]);
+                break;
+            }
+        }
+        if (amount <= 0) amount = 1;
+        if (ed->cursor_line + amount < buf->count)
+            ed->cursor_line += amount;
+        else if (buf->count > 0)
+            ed->cursor_line = buf->count - 1;
+        size_t len = strlen(buf->lines[ed->cursor_line]);
+        if (ed->cursor_col > len) ed->cursor_col = len;
+        // Clear cmdbuf after navigation
+        ed->cmdlen = 0;
+        ed->cmdbuf[0] = '\0';
+        ed->mode_insert = 1;
+        return;
+    }
 }
 
 void editor_process_lsp(EditorState *ed) {
