@@ -11,9 +11,14 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <limits.h>
+#include <linux/limits.h>
 
+#define JSVIM_CONFIG_FILE ".jsvimrc"
+#define MAX_LSP_ARGS 8
 
-static const LspCmd LSP_CMDS[] = {
+// Default LSP commands (used as fallback)
+static const LspCmd LSP_CMDS_DEFAULT[] = {
     [FT_NONE] = { { NULL } },
     [FT_C] = {
         { "clangd", NULL }
@@ -31,6 +36,129 @@ static const LspCmd LSP_CMDS[] = {
         { "typescript-language-server", "--stdio", NULL }
     },
 };
+
+// Custom LSP commands from config file
+typedef struct {
+    char *argv[MAX_LSP_ARGS];  // dynamically allocated, NULL-terminated
+} LspCmdConfig;
+
+static LspCmdConfig lsp_config[FT_MARKDOWN + 1] = {0};
+static int lsp_config_loaded = 0;
+
+// Map config key to FileType
+static FileType config_key_to_filetype(const char *key) {
+    if (strcmp(key, "lsp.c") == 0) return FT_C;
+    if (strcmp(key, "lsp.cpp") == 0) return FT_CPP;
+    if (strcmp(key, "lsp.python") == 0) return FT_PYTHON;
+    if (strcmp(key, "lsp.typescript") == 0) return FT_TS;
+    if (strcmp(key, "lsp.javascript") == 0) return FT_JS;
+    if (strcmp(key, "lsp.rust") == 0) return FT_RUST;
+    if (strcmp(key, "lsp.go") == 0) return FT_GO;
+    if (strcmp(key, "lsp.java") == 0) return FT_JAVA;
+    if (strcmp(key, "lsp.sh") == 0) return FT_SH;
+    if (strcmp(key, "lsp.json") == 0) return FT_JSON;
+    if (strcmp(key, "lsp.markdown") == 0) return FT_MARKDOWN;
+    return FT_NONE;
+}
+
+// Free a single LspCmdConfig entry
+static void free_lsp_cmd_config(LspCmdConfig *cfg) {
+    for (int i = 0; i < MAX_LSP_ARGS && cfg->argv[i]; i++) {
+        free(cfg->argv[i]);
+        cfg->argv[i] = NULL;
+    }
+}
+
+// Parse a command string into argv array (space-separated)
+static void parse_lsp_command(const char *cmd, LspCmdConfig *cfg) {
+    free_lsp_cmd_config(cfg);
+    
+    char *cmdcopy = strdup(cmd);
+    if (!cmdcopy) return;
+    
+    int argc = 0;
+    char *token = strtok(cmdcopy, " \t");
+    while (token && argc < MAX_LSP_ARGS - 1) {
+        cfg->argv[argc++] = strdup(token);
+        token = strtok(NULL, " \t");
+    }
+    cfg->argv[argc] = NULL;
+    
+    free(cmdcopy);
+}
+
+// Load LSP configuration from ~/.jsvimrc
+void lsp_load_config(void) {
+    if (lsp_config_loaded) return;
+    lsp_config_loaded = 1;
+    
+    const char *home = getenv("HOME");
+    if (!home) return;
+    
+    char config_path[1024];
+    snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
+    
+    FILE *fp = fopen(config_path, "r");
+    if (!fp) return;
+    
+    char line[1024];
+    while (fgets(line, sizeof(line), fp)) {
+        // Skip comments and empty lines
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\0') continue;
+        
+        // Remove trailing newline
+        size_t len = strlen(p);
+        if (len > 0 && p[len-1] == '\n') p[len-1] = '\0';
+        
+        // Parse key=value
+        char *eq = strchr(p, '=');
+        if (!eq) continue;
+        
+        *eq = '\0';
+        char *key = p;
+        char *value = eq + 1;
+        
+        // Trim whitespace from key
+        char *key_end = eq - 1;
+        while (key_end > key && (*key_end == ' ' || *key_end == '\t')) *key_end-- = '\0';
+        
+        // Trim leading whitespace from value
+        while (*value == ' ' || *value == '\t') value++;
+        
+        // Check if this is an LSP config key
+        FileType ft = config_key_to_filetype(key);
+        if (ft != FT_NONE) {
+            parse_lsp_command(value, &lsp_config[ft]);
+        }
+    }
+    
+    fclose(fp);
+}
+
+// Get LSP command for a filetype (checks config first, then defaults)
+static const char *const *get_lsp_cmd(FileType ft) {
+    // Ensure config is loaded
+    if (!lsp_config_loaded) {
+        lsp_load_config();
+    }
+    
+    // Check if we have a custom config for this filetype
+    if (ft > FT_NONE && ft <= FT_MARKDOWN && lsp_config[ft].argv[0]) {
+        return (const char *const *)lsp_config[ft].argv;
+    }
+    
+    // Fall back to defaults
+    return LSP_CMDS_DEFAULT[ft].argv;
+}
+
+// Cleanup LSP config (call on exit)
+void lsp_config_cleanup(void) {
+    for (int i = 0; i <= FT_MARKDOWN; i++) {
+        free_lsp_cmd_config(&lsp_config[i]);
+    }
+}
 
 // Map FileType to LSP languageId string
 static const char *lsp_language_id(FileType ft) {
@@ -96,9 +224,20 @@ void lsp_notify_did_open(Buffer *buf) {
         if (buf->filepath[0] == '/') {
             snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", buf->filepath);
         } else if (buf->filepath[0] != '\0') {
-            char cwd[1024];
-            getcwd(cwd, sizeof(cwd));
-            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s/%s", cwd, buf->filepath);
+            // Use realpath to get canonical absolute path (handles ./path and ../path)
+            char resolved[PATH_MAX];
+            if (realpath(buf->filepath, resolved)) {
+                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", resolved);
+            } else {
+                // Fallback: strip leading ./ and combine with cwd
+                const char *rel_path = buf->filepath;
+                if (rel_path[0] == '.' && rel_path[1] == '/') {
+                    rel_path += 2;  // skip "./"
+                }
+                char cwd[1024];
+                getcwd(cwd, sizeof(cwd));
+                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s/%s", cwd, rel_path);
+            }
         } else {
             char cwd[1024];
             getcwd(cwd, sizeof(cwd));
@@ -144,32 +283,96 @@ void lsp_notify_did_open(Buffer *buf) {
 void lsp_initialize(Buffer *buf) {
     if (buf->lsp.stdin_fd == -1) return;
 
-    char json[512];
-    snprintf(json, sizeof(json),
-        "{"\
-            "\"jsonrpc\":\"2.0\","\
-            "\"id\":1,"\
-            "\"method\":\"initialize\","\
-            "\"params\":{"\
-                "\"processId\":%d,"\
-                "\"rootUri\":null,"\
-                "\"capabilities\":{" \
-                    "\"textDocument\":{"
-                        "\"semanticTokens\":{"
-                            "\"requests\":{"
-                                "\"full\":true"
-                            "},"\
-                            "\"tokenTypes\":[],"
-                            "\"tokenModifiers\":[]"
-                        "}"
-                    "}"
-                "}"\
-            "}"\
-        "}",
-        getpid()
-    );
+    // Build rootUri from file path - pyright and many other LSPs require this
+    char root_uri[2048] = {0};
+    if (buf->filepath[0] == '/') {
+        // Find the directory containing the file
+        char dirpath[1024];
+        strncpy(dirpath, buf->filepath, sizeof(dirpath) - 1);
+        char *last_slash = strrchr(dirpath, '/');
+        if (last_slash && last_slash != dirpath) {
+            *last_slash = '\0';
+        }
+        snprintf(root_uri, sizeof(root_uri), "file://%s", dirpath);
+    } else if (buf->filepath[0] != '\0') {
+        // Use realpath to get canonical absolute path (handles ./path and ../path)
+        char resolved[PATH_MAX];
+        if (realpath(buf->filepath, resolved)) {
+            // Find directory from resolved path
+            char *last_slash = strrchr(resolved, '/');
+            if (last_slash && last_slash != resolved) {
+                *last_slash = '\0';
+            }
+            snprintf(root_uri, sizeof(root_uri), "file://%s", resolved);
+        } else {
+            // Fallback to cwd
+            char cwd[1024];
+            if (getcwd(cwd, sizeof(cwd))) {
+                snprintf(root_uri, sizeof(root_uri), "file://%s", cwd);
+            }
+        }
+    } else {
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd))) {
+            snprintf(root_uri, sizeof(root_uri), "file://%s", cwd);
+        }
+    }
 
-    lsp_send(&buf->lsp, json);
+    // Build initialize request using cJSON for proper escaping
+    cJSON *req = cJSON_CreateObject();
+    if (!req) return;
+
+    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+    cJSON_AddNumberToObject(req, "id", 1);
+    cJSON_AddStringToObject(req, "method", "initialize");
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddItemToObject(req, "params", params);
+
+    cJSON_AddNumberToObject(params, "processId", getpid());
+    
+    // Add rootUri (required by pyright and many other LSPs)
+    if (root_uri[0] != '\0') {
+        cJSON_AddStringToObject(params, "rootUri", root_uri);
+    } else {
+        cJSON_AddNullToObject(params, "rootUri");
+    }
+
+    // Add capabilities
+    cJSON *caps = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "capabilities", caps);
+
+    cJSON *textDoc = cJSON_CreateObject();
+    cJSON_AddItemToObject(caps, "textDocument", textDoc);
+
+    cJSON *semTokens = cJSON_CreateObject();
+    cJSON_AddItemToObject(textDoc, "semanticTokens", semTokens);
+
+    cJSON *requests = cJSON_CreateObject();
+    cJSON_AddItemToObject(semTokens, "requests", requests);
+    cJSON_AddBoolToObject(requests, "full", 1);
+
+    cJSON *tokenTypes = cJSON_CreateArray();
+    cJSON_AddItemToObject(semTokens, "tokenTypes", tokenTypes);
+
+    cJSON *tokenModifiers = cJSON_CreateArray();
+    cJSON_AddItemToObject(semTokens, "tokenModifiers", tokenModifiers);
+
+    // Add workspaceFolders capability (helps pyright)
+    cJSON *workspace = cJSON_CreateObject();
+    cJSON_AddItemToObject(caps, "workspace", workspace);
+
+    cJSON *wsFolders = cJSON_CreateObject();
+    cJSON_AddItemToObject(workspace, "workspaceFolders", wsFolders);
+    cJSON_AddBoolToObject(wsFolders, "supported", 1);
+
+    char *json = cJSON_PrintUnformatted(req);
+    if (json) {
+        lsp_send(&buf->lsp, json);
+        free(json);
+    }
+
+    cJSON_Delete(req);
 }
 
 void lsp_notify_did_change(Buffer *buf) {
@@ -577,24 +780,25 @@ struct LSPProcess spawn_lsp(FileType *ft) {
     if (pid == 0) {
         dup2(in_pipe[0], STDIN_FILENO);
         dup2(out_pipe[1], STDOUT_FILENO);
-
+        
+        close(in_pipe[0]);
         close(in_pipe[1]);
         close(out_pipe[0]);
-
+        close(out_pipe[1]);
+        
         int devnull = open("/dev/null", O_WRONLY);
         if (devnull >= 0) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-
+    
         setpgid(0, 0);
-
-        const char *const *cmd = LSP_CMDS[*ft].argv;
-        
+    
+        const char *const *cmd = get_lsp_cmd(*ft);
         execvp(cmd[0], (char *const *)cmd);
-        perror("execvp error");
         _exit(1);
     }
+
 
     // Close ends not used by jsvim
     close(in_pipe[0]);

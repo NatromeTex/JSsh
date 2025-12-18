@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.2.4\"
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.2.7\"
 LDFLAGS = -lm -ldl -lreadline -lncurses -lssh -lgit2
 
 # core sources

@@ -31,4 +31,8 @@ void lsp_notify_did_open(Buffer *buf);
 void lsp_notify_did_change(Buffer *buf);
 void lsp_request_semantic_tokens(Buffer *buf);
 
+// LSP configuration from ~/.jsvimrc
+void lsp_load_config(void);
+void lsp_config_cleanup(void);
+
 #endif

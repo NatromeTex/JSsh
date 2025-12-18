@@ -8,6 +8,9 @@
 #include <ncurses.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "util.h"
 #include "buffer.h"
@@ -18,15 +21,47 @@
 #include "highlight.h"
 
 #ifndef JSVIM_VERSION
-#define JSVIM_VERSION "0.2.4"
+#define JSVIM_VERSION "0.2.7"
 #endif
 #ifndef JSSH_VERSION
 #define JSSH_VERSION "unknown"
 #endif
 
+#define JSVIM_CONFIG_FILE ".jsvimrc"
+
+// Open or create the config file at ~/.jsvimrc
+// Returns: 0 on success, -1 on failure
+static int init_config_file(void) {
+    const char *home = getenv("HOME");
+    if (!home) {
+        return -1;
+    }
+
+    char config_path[1024];
+    snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
+
+    // Check if file exists
+    struct stat st;
+    if (stat(config_path, &st) == 0) {
+        // File exists, nothing to do for now
+        return 0;
+    }
+
+    // File doesn't exist, create it
+    FILE *fp = fopen(config_path, "w");
+    if (!fp) {
+        return -1;
+    }
+    fclose(fp);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     EditorState ed;
     editor_init(&ed);
+
+    // Initialize config file
+    init_config_file();
     
     if (argc > 1) {
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
@@ -119,6 +154,9 @@ int main(int argc, char **argv) {
     int ch;
 
     while (!ed.quit) {
+        // Process LSP messages first to get diagnostics before rendering
+        editor_process_lsp(&ed);
+        
         getmaxyx(stdscr, maxy, maxx);
         
         // Delete old windows if they exist
@@ -128,10 +166,12 @@ int main(int argc, char **argv) {
         // Create main window (everything except last row)
         main_win = newwin(maxy - 1, maxx, 0, 0);
         keypad(main_win, TRUE);
+        wtimeout(main_win, 200);  // Set timeout for LSP message processing
         
         // Create command window (last row only)
         cmd_win = newwin(1, maxx, maxy - 1, 0);
         keypad(cmd_win, TRUE);
+        wtimeout(cmd_win, 200);  // Set timeout for LSP message processing
 
         int gutter_width = compute_gutter_width(ed.buf.count);
         int col_offset = gutter_width + 2;
@@ -175,9 +215,6 @@ int main(int argc, char **argv) {
             ch = wgetch(cmd_win);
             editor_handle_command_mode(&ed, ch, cmd_win, maxx);
         }
-
-        // Process LSP messages
-        editor_process_lsp(&ed);
     }
 
     // Cleanup
@@ -185,6 +222,7 @@ int main(int argc, char **argv) {
     if (cmd_win) delwin(cmd_win);
     editor_cleanup(&ed);
     highlight_cleanup();
+    lsp_config_cleanup();
     render_cleanup();
 
     return 0;
