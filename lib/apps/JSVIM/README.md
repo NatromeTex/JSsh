@@ -7,10 +7,12 @@ JSVIM is a lightweight terminal-based text editor built with ncurses, designed a
 - **Modal Editing**: Insert and command modes similar to vim
 - **Syntax Highlighting**: Regex-based highlighting for multiple languages
 - **LSP Integration**: Deep semantic highlighting for C/C++ via clangd
+- **Configurable LSP Servers**: User-defined language servers via `~/.jsvimrc`
 - **File Type Detection**: Automatic language detection based on file extension
 - **Block Comment Support**: Proper handling of multi-line comments
 
 ## Supported Languages
+These language servers have been tested for compatibility with JSVIM
 
 | Language   | File Extensions                           | LSP Support |
 |------------|-------------------------------------------|-------------|
@@ -41,6 +43,71 @@ JSVIM/
 ├── lsp.c/h       # Language Server Protocol client
 └── util.c/h      # Common utilities
 ```
+
+## Configuration
+
+JSVIM can be configured via a `~/.jsvimrc` file in your home directory. This file allows you to customize LSP servers for each language.
+
+### Configuration File Format
+
+The config file uses a simple `key=value` format:
+
+```ini
+# ~/.jsvimrc - JSVIM Configuration
+
+# LSP server configurations
+# Format: lsp.<language>=<command> [args...]
+
+lsp.c=clangd
+lsp.cpp=clangd
+lsp.python=pyright-langserver --stdio
+lsp.javascript=typescript-language-server --stdio
+lsp.typescript=typescript-language-server --stdio
+lsp.rust=rust-analyzer
+lsp.go=gopls
+```
+
+### Available LSP Configuration Keys
+
+| Key | Language | Default Server |
+|-----|----------|----------------|
+| `lsp.c` | C | `clangd` |
+| `lsp.cpp` | C++ | `clangd` |
+| `lsp.python` | Python | `pyright-langserver --stdio` |
+| `lsp.javascript` | JavaScript | `typescript-language-server --stdio` |
+| `lsp.typescript` | TypeScript | `typescript-language-server --stdio` |
+| `lsp.rust` | Rust | (none) |
+| `lsp.go` | Go | (none) |
+| `lsp.java` | Java | (none) |
+| `lsp.sh` | Shell | (none) |
+| `lsp.json` | JSON | (none) |
+| `lsp.markdown` | Markdown | (none) |
+
+### Example Configurations
+
+**Using pylsp instead of pyright:**
+```ini
+lsp.python=pylsp
+```
+
+**Using custom clangd path:**
+```ini
+lsp.c=/usr/local/bin/clangd --background-index
+lsp.cpp=/usr/local/bin/clangd --background-index
+```
+
+**Enabling rust-analyzer:**
+```ini
+lsp.rust=rust-analyzer
+```
+
+**Using deno for JavaScript/TypeScript:**
+```ini
+lsp.javascript=deno lsp
+lsp.typescript=deno lsp
+```
+
+> **Note:** If `~/.jsvimrc` does not exist or a language is not configured, JSVIM falls back to built-in defaults.
 
 ## Highlighting System
 
@@ -344,7 +411,23 @@ static LanguageHighlighter *all_highlighters[] = {
 
 # Adding LSP Support for a Language
 
-To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features, follow these steps.
+To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features, you have two options:
+
+## Option 1: User Configuration (Recommended)
+
+The easiest way to add LSP support for a language is via the `~/.jsvimrc` configuration file. Simply add a line specifying the LSP command:
+
+```ini
+# ~/.jsvimrc
+lsp.rust=rust-analyzer
+lsp.go=gopls
+```
+
+This requires no code changes and takes effect immediately on next file open.
+
+## Option 2: Built-in Support (For Developers)
+
+To add permanent built-in LSP support for a language, follow the steps below.
 
 ## Overview
 
@@ -356,10 +439,10 @@ JSVIM's LSP integration works as follows:
 
 ## Step 1: Add LSP Command Configuration
 
-In [lsp.c](lsp.c), add an entry to the `LSP_CMDS` array. This array maps `FileType` values to the command used to start the LSP server:
+In [lsp.c](lsp.c), add an entry to the `LSP_CMDS_DEFAULT` array. This array maps `FileType` values to the default command used to start the LSP server:
 
 ```c
-static const LspCmd LSP_CMDS[] = {
+static const LspCmd LSP_CMDS_DEFAULT[] = {
     [FT_NONE] = { { NULL } },
     [FT_C] = {
         { "clangd", NULL }
@@ -382,6 +465,8 @@ static const LspCmd LSP_CMDS[] = {
     },
 };
 ```
+
+> **Note:** Users can override these defaults via `~/.jsvimrc` (see Configuration section above).
 
 ### LspCmd Structure
 
@@ -426,34 +511,36 @@ if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP || ed.buf.ft == FT_RUBY) {
 }
 ```
 
-## Step 3: Set the Language ID (Optional)
+## Step 3: Set the Language ID (If Adding New FileType)
 
-Some LSP servers require a specific `languageId` in the `textDocument/didOpen` notification. In [lsp.c](lsp.c), the `lsp_notify_did_open()` function currently hardcodes `"c"`:
-
-```c
-cJSON_AddStringToObject(td, "languageId", "c");
-```
-
-For proper multi-language support, you may want to modify this to use the correct language ID based on file type:
+LSP servers require a specific `languageId` in the `textDocument/didOpen` notification. In [lsp.c](lsp.c), the `lsp_language_id()` function maps file types to language IDs:
 
 ```c
-const char* get_language_id(FileType ft) {
+static const char *lsp_language_id(FileType ft) {
     switch (ft) {
-        case FT_C:      return "c";
-        case FT_CPP:    return "cpp";
-        case FT_PYTHON: return "python";
-        case FT_JS:     return "javascript";
-        case FT_TS:     return "typescript";
-        case FT_RUBY:   return "ruby";
-        case FT_RUST:   return "rust";
-        case FT_GO:     return "go";
-        case FT_LUA:    return "lua";
-        default:        return "plaintext";
+        case FT_C:        return "c";
+        case FT_CPP:      return "cpp";
+        case FT_JS:       return "javascript";
+        case FT_TS:       return "typescript";
+        case FT_PYTHON:   return "python";
+        case FT_RUST:     return "rust";
+        case FT_GO:       return "go";
+        case FT_JAVA:     return "java";
+        case FT_SH:       return "shellscript";
+        case FT_MAKEFILE: return "makefile";
+        case FT_JSON:     return "json";
+        case FT_MARKDOWN: return "markdown";
+        // Add your language here:
+        case FT_RUBY:     return "ruby";
+        default:          return "plaintext";
     }
 }
+```
 
-// In lsp_notify_did_open():
-cJSON_AddStringToObject(td, "languageId", get_language_id(buf->ft));
+Also add the config key mapping in `config_key_to_filetype()`:
+
+```c
+if (strcmp(key, "lsp.ruby") == 0) return FT_RUBY;
 ```
 
 ## LSP Protocol Details
@@ -481,6 +568,8 @@ Content-Length: 123\r\n
 
 | Function | Purpose |
 |----------|---------|
+| `lsp_load_config()` | Load LSP config from `~/.jsvimrc` |
+| `lsp_config_cleanup()` | Free config memory on exit |
 | `spawn_lsp()` | Fork and exec LSP server process |
 | `stop_lsp()` | Terminate LSP server |
 | `lsp_send()` | Send JSON-RPC message with headers |
@@ -507,7 +596,16 @@ SemanticKind semantic_kind_from_lsp(const char *type) {
 
 ## Complete Example: Adding Rust LSP Support
 
-### 1. In lsp.c, add to LSP_CMDS:
+### Quick Method (User Config)
+
+Simply add to `~/.jsvimrc`:
+```ini
+lsp.rust=rust-analyzer
+```
+
+### Built-in Method (Code Changes)
+
+### 1. In lsp.c, add to LSP_CMDS_DEFAULT:
 ```c
 [FT_RUST] = {
     { "rust-analyzer", NULL }
@@ -535,10 +633,11 @@ rustup component add rust-analyzer
 
 ## Debugging LSP Issues
 
-1. **LSP not starting**: Check if the LSP executable is in PATH
+1. **LSP not starting**: Check if the LSP executable is in PATH. Verify your `~/.jsvimrc` syntax if using custom config.
 2. **No semantic tokens**: Check if the server supports `textDocument/semanticTokens`
 3. **Wrong highlighting**: Check the token type mapping in `semantic_kind_from_lsp()`
 4. **Communication errors**: LSP stderr is redirected to `/dev/null` by default; modify `spawn_lsp()` to see errors
+5. **Config not loading**: Ensure `~/.jsvimrc` has correct permissions and no syntax errors
 
 To enable LSP debug output, you can temporarily remove the stderr redirection in `spawn_lsp()`:
 

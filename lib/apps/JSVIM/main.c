@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
 
         noecho();
         if (strlen(fnamebuf) > 0) {
-            strncpy(ed.filename, fnamebuf, sizeof(ed.filename)-1);
+            snprintf(ed.filename, sizeof(ed.filename), "%s", fnamebuf);
             ed.have_filename = 1;
             ed.existing_file = !load_file(&ed.buf, ed.filename);
             if (!ed.existing_file) {

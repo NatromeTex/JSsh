@@ -227,7 +227,7 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                     mvwgetnstr(cmd_win, 0, 1 + (int)strlen(pr), fnamebuf, sizeof(fnamebuf)-1);
                     noecho();
                     if (strlen(fnamebuf) > 0) {
-                        strncpy(ed->filename, fnamebuf, sizeof(ed->filename)-1);
+                        snprintf(ed->filename, sizeof(ed->filename), "%s", fnamebuf);
                         ed->have_filename = 1;
                     }
                 }
@@ -236,8 +236,7 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                         // ask create?
                         char qbuf[128];
                         char fname_short[64];
-                        strncpy(fname_short, ed->filename, sizeof(fname_short)-1);
-                        fname_short[sizeof(fname_short)-1] = '\0';
+                        snprintf(fname_short, sizeof(fname_short), "%.63s", ed->filename);
                         snprintf(qbuf, sizeof(qbuf), "Create %s and write to it? (Y/n): ", fname_short);
                         wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                         for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
@@ -291,7 +290,7 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                     mvwgetnstr(cmd_win, 0, 1 + (int)strlen(pr), fnamebuf, sizeof(fnamebuf)-1);
                     noecho();
                     if (strlen(fnamebuf) > 0) {
-                        strncpy(ed->filename, fnamebuf, sizeof(ed->filename)-1);
+                        snprintf(ed->filename, sizeof(ed->filename), "%s", fnamebuf);
                         ed->have_filename = 1;
                     }
                 }
@@ -300,8 +299,7 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                         // ask create?
                         char qbuf[128];
                         char fname_short[64];
-                        strncpy(fname_short, ed->filename, sizeof(fname_short)-1);
-                        fname_short[sizeof(fname_short)-1] = '\0';
+                        snprintf(fname_short, sizeof(fname_short), "%.63s", ed->filename);
                         snprintf(qbuf, sizeof(qbuf), "Create %s and write to it? (Y/n): ", fname_short);
                         wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                         for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');

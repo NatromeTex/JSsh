@@ -188,8 +188,9 @@ void lsp_send(struct LSPProcess *p, const char *json) {
     int hlen = snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n", len);
 
     // Write in two pieces: header, then body
-    write(p->stdin_fd, header, hlen);
-    write(p->stdin_fd, json, len);
+    ssize_t w1 = write(p->stdin_fd, header, hlen);
+    ssize_t w2 = write(p->stdin_fd, json, len);
+    (void)w1; (void)w2; // Suppress unused warnings
 }
 
 void lsp_append_data(struct LSPProcess *p, const char *data, size_t n) {
@@ -222,12 +223,12 @@ void lsp_notify_did_open(Buffer *buf) {
     // Prefer the actual file path when available.
     if (buf->lsp_uri[0] == '\0') {
         if (buf->filepath[0] == '/') {
-            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", buf->filepath);
+            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%.4080s", buf->filepath);
         } else if (buf->filepath[0] != '\0') {
             // Use realpath to get canonical absolute path (handles ./path and ../path)
             char resolved[PATH_MAX];
             if (realpath(buf->filepath, resolved)) {
-                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", resolved);
+                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%.4080s", resolved);
             } else {
                 // Fallback: strip leading ./ and combine with cwd
                 const char *rel_path = buf->filepath;
@@ -235,13 +236,15 @@ void lsp_notify_did_open(Buffer *buf) {
                     rel_path += 2;  // skip "./"
                 }
                 char cwd[1024];
-                getcwd(cwd, sizeof(cwd));
-                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s/%s", cwd, rel_path);
+                if (getcwd(cwd, sizeof(cwd))) {
+                    snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s/%s", cwd, rel_path);
+                }
             }
         } else {
             char cwd[1024];
-            getcwd(cwd, sizeof(cwd));
-            snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", cwd);
+            if (getcwd(cwd, sizeof(cwd))) {
+                snprintf(buf->lsp_uri, sizeof(buf->lsp_uri), "file://%s", cwd);
+            }
         }
     }
 
@@ -284,11 +287,11 @@ void lsp_initialize(Buffer *buf) {
     if (buf->lsp.stdin_fd == -1) return;
 
     // Build rootUri from file path - pyright and many other LSPs require this
-    char root_uri[2048] = {0};
+    char root_uri[PATH_MAX + 16] = {0};
     if (buf->filepath[0] == '/') {
         // Find the directory containing the file
-        char dirpath[1024];
-        strncpy(dirpath, buf->filepath, sizeof(dirpath) - 1);
+        char dirpath[PATH_MAX];
+        snprintf(dirpath, sizeof(dirpath), "%s", buf->filepath);
         char *last_slash = strrchr(dirpath, '/');
         if (last_slash && last_slash != dirpath) {
             *last_slash = '\0';
@@ -344,6 +347,11 @@ void lsp_initialize(Buffer *buf) {
 
     cJSON *textDoc = cJSON_CreateObject();
     cJSON_AddItemToObject(caps, "textDocument", textDoc);
+
+    // Declare publishDiagnostics support (required by typescript-language-server)
+    cJSON *pubDiag = cJSON_CreateObject();
+    cJSON_AddItemToObject(textDoc, "publishDiagnostics", pubDiag);
+    cJSON_AddBoolToObject(pubDiag, "relatedInformation", 1);
 
     cJSON *semTokens = cJSON_CreateObject();
     cJSON_AddItemToObject(textDoc, "semanticTokens", semTokens);
