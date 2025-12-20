@@ -270,6 +270,31 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         // Move cursor to end of line
         ed->cursor_col = strlen(buf->lines[ed->cursor_line]);
         break;
+    case KEY_DC:  // Delete key
+        {
+            char *line = buf->lines[ed->cursor_line];
+            size_t len = strlen(line);
+            if (ed->cursor_col < len) {
+                // delete character at cursor
+                memmove(line + ed->cursor_col, line + ed->cursor_col + 1, len - ed->cursor_col);
+                ed->modified = 1;
+                buf->lsp_dirty = 1;
+            } else if (ed->cursor_line + 1 < buf->count) {
+                // at end of line, join with next line
+                size_t nextlen = strlen(buf->lines[ed->cursor_line + 1]);
+                line = realloc(line, len + nextlen + 1);
+                memcpy(line + len, buf->lines[ed->cursor_line + 1], nextlen + 1);
+                buf->lines[ed->cursor_line] = line;
+                free(buf->lines[ed->cursor_line + 1]);
+                // shift lines up
+                for (size_t i = ed->cursor_line + 1; i + 1 < buf->count; i++) 
+                    buf->lines[i] = buf->lines[i + 1];
+                buf->count--;
+                ed->modified = 1;
+                buf->lsp_dirty = 1;
+            }
+        }
+        break;
     case KEY_BACKSPACE:
     case 127:
     case '\b':

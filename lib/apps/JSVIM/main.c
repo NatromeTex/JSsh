@@ -21,7 +21,7 @@
 #include "highlight.h"
 
 #ifndef JSVIM_VERSION
-#define JSVIM_VERSION "0.2.7"
+#define JSVIM_VERSION "0.3.0"
 #endif
 #ifndef JSSH_VERSION
 #define JSSH_VERSION "unknown"
