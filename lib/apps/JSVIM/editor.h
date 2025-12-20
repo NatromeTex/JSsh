@@ -27,7 +27,21 @@ typedef struct {
     int line_number_relative;  // 0 = absolute, 1 = relative
     int file_created;          // 1 if file exists or user confirmed creation
     int pending_create_prompt; // 1 if waiting for user to confirm file creation
+    
+    int tab_width;  // -1 = use \t, >0 = number of spaces per tab
 } EditorState;
+
+// Load editor configuration from ~/.jsvimrc
+void editor_load_config(EditorState *ed);
+
+// Get the indentation string based on tab_width setting
+const char *editor_get_indent_str(EditorState *ed);
+
+// Get the current line's indentation
+char *editor_get_line_indent(const char *line);
+
+// Get auto-indent for new line based on language and previous line
+char *editor_auto_indent(EditorState *ed, const char *prev_line);
 
 // Initialize editor state
 void editor_init(EditorState *ed);

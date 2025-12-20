@@ -47,11 +47,18 @@ static int init_config_file(void) {
         return 0;
     }
 
-    // File doesn't exist, create it
+    // File doesn't exist, create it with default settings
     FILE *fp = fopen(config_path, "w");
     if (!fp) {
         return -1;
     }
+    // Write default config with comments
+    fprintf(fp, "# JSVIM Configuration File\n");
+    fprintf(fp, "# \n");
+    fprintf(fp, "# Tab width setting:\n");
+    fprintf(fp, "#   -1 = use actual tab character (\\t)\n");
+    fprintf(fp, "#   >0 = number of spaces per tab (e.g., 2, 4, 8)\n");
+    fprintf(fp, "editor.tab=4\n");
     fclose(fp);
     return 0;
 }
@@ -60,8 +67,9 @@ int main(int argc, char **argv) {
     EditorState ed;
     editor_init(&ed);
 
-    // Initialize config file
+    // Initialize config file and load settings
     init_config_file();
+    editor_load_config(&ed);
     
     if (argc > 1) {
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
