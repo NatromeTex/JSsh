@@ -46,7 +46,7 @@ JSVIM/
 
 ## Configuration
 
-JSVIM can be configured via a `~/.jsvimrc` file in your home directory. This file allows you to customize LSP servers for each language.
+JSVIM can be configured via a `~/.jsvimrc` file in your home directory. This file allows you to customize LSP servers for each language, and also define editor level settings like tab width.
 
 ### Configuration File Format
 
@@ -66,22 +66,6 @@ lsp.typescript=typescript-language-server --stdio
 lsp.rust=rust-analyzer
 lsp.go=gopls
 ```
-
-### Available LSP Configuration Keys
-
-| Key | Language | Default Server |
-|-----|----------|----------------|
-| `lsp.c` | C | `clangd` |
-| `lsp.cpp` | C++ | `clangd` |
-| `lsp.python` | Python | `pyright-langserver --stdio` |
-| `lsp.javascript` | JavaScript | `typescript-language-server --stdio` |
-| `lsp.typescript` | TypeScript | `typescript-language-server --stdio` |
-| `lsp.rust` | Rust | (none) |
-| `lsp.go` | Go | (none) |
-| `lsp.java` | Java | (none) |
-| `lsp.sh` | Shell | (none) |
-| `lsp.json` | JSON | (none) |
-| `lsp.markdown` | Markdown | (none) |
 
 ### Example Configurations
 
@@ -107,7 +91,26 @@ lsp.javascript=deno lsp
 lsp.typescript=deno lsp
 ```
 
-> **Note:** If `~/.jsvimrc` does not exist or a language is not configured, JSVIM falls back to built-in defaults.
+**Customizing semantic colors:**
+```ini
+# Semantic token colors (ncurses color indexes; -1 = default)
+editor.color.keyword=4      # COLOR_BLUE
+editor.color.type=6         # COLOR_CYAN
+editor.color.function=3     # COLOR_YELLOW
+editor.color.string=127
+editor.color.number=14
+editor.color.comment=34
+editor.color.operator=7     # COLOR_WHITE
+editor.color.macro=5        # COLOR_MAGENTA
+editor.color.class=2        # COLOR_GREEN
+editor.color.enum=2
+editor.color.namespace=66
+editor.color.variable=7
+editor.color.parameter=180
+editor.color.property=110
+```
+
+> **Note:** If `~/.jsvimrc` does not exist or a language is not configured, JSVIM falls back to built-in defaults. It also creates the file on startup
 
 ## Highlighting System
 
@@ -413,7 +416,7 @@ static LanguageHighlighter *all_highlighters[] = {
 
 To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features, you have two options:
 
-## Option 1: User Configuration (Recommended)
+## User Configuration (Recommended)
 
 The easiest way to add LSP support for a language is via the `~/.jsvimrc` configuration file. Simply add a line specifying the LSP command:
 
@@ -424,49 +427,6 @@ lsp.go=gopls
 ```
 
 This requires no code changes and takes effect immediately on next file open.
-
-## Option 2: Built-in Support (For Developers)
-
-To add permanent built-in LSP support for a language, follow the steps below.
-
-## Overview
-
-JSVIM's LSP integration works as follows:
-1. When a file is opened, JSVIM checks if an LSP server is configured for that file type
-2. If configured, it spawns the LSP server process and communicates via stdin/stdout
-3. The LSP provides semantic tokens that layer on top of regex-based highlighting
-4. LSP tokens take priority over regex tokens for more accurate highlighting
-
-## Step 1: Add LSP Command Configuration
-
-In [lsp.c](lsp.c), add an entry to the `LSP_CMDS_DEFAULT` array. This array maps `FileType` values to the default command used to start the LSP server:
-
-```c
-static const LspCmd LSP_CMDS_DEFAULT[] = {
-    [FT_NONE] = { { NULL } },
-    [FT_C] = {
-        { "clangd", NULL }
-    },
-    [FT_CPP] = {
-        { "clangd", NULL }
-    },
-    [FT_PYTHON] = {
-        { "pyright-langserver", "--stdio", NULL }
-    },
-    [FT_TS] = {
-        { "typescript-language-server", "--stdio", NULL }
-    },
-    [FT_JS] = {
-        { "typescript-language-server", "--stdio", NULL }
-    },
-    // Add your language here:
-    [FT_RUBY] = {
-        { "solargraph", "stdio", NULL }
-    },
-};
-```
-
-> **Note:** Users can override these defaults via `~/.jsvimrc` (see Configuration section above).
 
 ### LspCmd Structure
 
@@ -593,63 +553,6 @@ SemanticKind semantic_kind_from_lsp(const char *type) {
     // ... etc
 }
 ```
-
-## Complete Example: Adding Rust LSP Support
-
-### Quick Method (User Config)
-
-Simply add to `~/.jsvimrc`:
-```ini
-lsp.rust=rust-analyzer
-```
-
-### Built-in Method (Code Changes)
-
-### 1. In lsp.c, add to LSP_CMDS_DEFAULT:
-```c
-[FT_RUST] = {
-    { "rust-analyzer", NULL }
-},
-```
-
-### 2. In main.c, enable LSP spawning:
-```c
-if (ed.buf.ft == FT_C || ed.buf.ft == FT_CPP || ed.buf.ft == FT_RUST) {
-    ed.buf.lsp = spawn_lsp(&ed.buf.ft);
-    if (ed.buf.lsp.pid > 0) {
-        lsp_initialize(&ed.buf);
-    }
-}
-```
-
-### 3. Ensure rust-analyzer is installed:
-```bash
-# Using rustup
-rustup component add rust-analyzer
-
-# Or download from releases
-# https://github.com/rust-lang/rust-analyzer/releases
-```
-
-## Debugging LSP Issues
-
-1. **LSP not starting**: Check if the LSP executable is in PATH. Verify your `~/.jsvimrc` syntax if using custom config.
-2. **No semantic tokens**: Check if the server supports `textDocument/semanticTokens`
-3. **Wrong highlighting**: Check the token type mapping in `semantic_kind_from_lsp()`
-4. **Communication errors**: LSP stderr is redirected to `/dev/null` by default; modify `spawn_lsp()` to see errors
-5. **Config not loading**: Ensure `~/.jsvimrc` has correct permissions and no syntax errors
-
-To enable LSP debug output, you can temporarily remove the stderr redirection in `spawn_lsp()`:
-
-```c
-// Comment out these lines to see LSP errors:
-// int devnull = open("/dev/null", O_WRONLY);
-// if (devnull >= 0) {
-//     dup2(devnull, STDERR_FILENO);
-//     close(devnull);
-// }
-```
-
 ---
 
 ## License

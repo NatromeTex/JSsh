@@ -3,6 +3,117 @@
 #include "highlight.h"
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <ctype.h>
+
+#define JSVIM_CONFIG_FILE ".jsvimrc"
+
+// Semantic color configuration loaded from ~/.jsvimrc
+typedef struct {
+    const char *name;  // token type name (e.g. "keyword")
+    int value;         // ncurses color index
+    int has_value;     // 1 if explicitly set in config
+} SemanticColorConfig;
+
+static SemanticColorConfig semantic_color_config[] = {
+    {"keyword",   0, 0},
+    {"type",      0, 0},
+    {"function",  0, 0},
+    {"string",    0, 0},
+    {"number",    0, 0},
+    {"comment",   0, 0},
+    {"operator",  0, 0},
+    {"macro",     0, 0},
+    {"class",     0, 0},
+    {"enum",      0, 0},
+    {"namespace", 0, 0},
+    {"variable",  0, 0},
+    {"parameter", 0, 0},
+    {"property",  0, 0},
+};
+
+static int semantic_colors_loaded = 0;
+
+static void load_semantic_colors_from_config(void) {
+    if (semantic_colors_loaded)
+        return;
+    semantic_colors_loaded = 1;
+
+    const char *home = getenv("HOME");
+    if (!home)
+        return;
+
+    char config_path[1024];
+    snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
+
+    FILE *fp = fopen(config_path, "r");
+    if (!fp)
+        return;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        char *p = line;
+
+        while (*p && isspace((unsigned char)*p))
+            p++;
+        if (*p == '#' || *p == '\0' || *p == '\n')
+            continue;
+
+        char *eq = strchr(p, '=');
+        if (!eq)
+            continue;
+
+        *eq = '\0';
+        char *key = p;
+        char *value = eq + 1;
+
+        char *end = eq - 1;
+        while (end > key && isspace((unsigned char)*end))
+            *end-- = '\0';
+
+        while (*value && isspace((unsigned char)*value))
+            value++;
+        end = value + strlen(value) - 1;
+        while (end > value && isspace((unsigned char)*end))
+            *end-- = '\0';
+
+        const char prefix[] = "editor.color.";
+        size_t prefix_len = sizeof(prefix) - 1;
+        if (strncmp(key, prefix, prefix_len) != 0)
+            continue;
+
+        const char *token_name = key + prefix_len;
+        if (*token_name == '\0')
+            continue;
+
+        char *endptr = NULL;
+        long parsed = strtol(value, &endptr, 10);
+        if (endptr == value)
+            continue;
+
+        for (size_t idx = 0; idx < sizeof(semantic_color_config) / sizeof(semantic_color_config[0]); idx++) {
+            if (strcmp(token_name, semantic_color_config[idx].name) == 0) {
+                semantic_color_config[idx].value = (int)parsed;
+                semantic_color_config[idx].has_value = 1;
+                break;
+            }
+        }
+    }
+
+    fclose(fp);
+}
+
+static int get_semantic_color(const char *name, int default_color) {
+    load_semantic_colors_from_config();
+
+    for (size_t idx = 0; idx < sizeof(semantic_color_config) / sizeof(semantic_color_config[0]); idx++) {
+        if (strcmp(name, semantic_color_config[idx].name) == 0 && semantic_color_config[idx].has_value) {
+            return semantic_color_config[idx].value;
+        }
+    }
+    return default_color;
+}
 
 void render_init(void) {
     initscr();
@@ -26,20 +137,22 @@ void render_init_colors(void) {
     init_pair(COLOR_PAIR_STATUS, COLOR_BLACK, 7); // status bar
     init_pair(COLOR_PAIR_ERROR, 196, -1);               // errors
     init_pair(COLOR_PAIR_WARNING, 226, -1);             // warnings
-    init_pair(SY_KEYWORD,  COLOR_BLUE,    -1);          // keywords 
-    init_pair(SY_TYPE,     COLOR_CYAN,    -1);          // types
-    init_pair(SY_FUNCTION, COLOR_YELLOW,  -1);          // functions
-    init_pair(SY_STRING,   127,   -1);                  // strings
-    init_pair(SY_NUMBER,   14, -1);                    // numbers
-    init_pair(SY_COMMENT,  34,   -1);                   // comments
-    init_pair(SY_OPERATOR,  COLOR_WHITE,  -1);   // operators stand out, neutral
-    init_pair(SY_MACRO,     COLOR_MAGENTA,-1);   // annotations
-    init_pair(SY_CLASS,     COLOR_GREEN,  -1);   // class / enum names
-    init_pair(SY_ENUM,      COLOR_GREEN,  -1);   // same as class
-    init_pair(SY_NAMESPACE, 66,            -1);  // packages (muted blue)
-    init_pair(SY_VARIABLE, COLOR_WHITE,   -1);   // default identifiers
-    init_pair(SY_PARAMETER, 180,           -1);  // subtle yellow
-    init_pair(SY_PROPERTY,  110,           -1);  // muted cyan
+
+    // Semantic token colors (foreground only, background stays default)
+    init_pair(SY_KEYWORD,   get_semantic_color("keyword",   COLOR_BLUE),    -1);
+    init_pair(SY_TYPE,      get_semantic_color("type",      COLOR_CYAN),    -1);
+    init_pair(SY_FUNCTION,  get_semantic_color("function",  COLOR_YELLOW),  -1);
+    init_pair(SY_STRING,    get_semantic_color("string",    127),           -1);
+    init_pair(SY_NUMBER,    get_semantic_color("number",    14),            -1);
+    init_pair(SY_COMMENT,   get_semantic_color("comment",   34),            -1);
+    init_pair(SY_OPERATOR,  get_semantic_color("operator",  COLOR_WHITE),   -1);
+    init_pair(SY_MACRO,     get_semantic_color("macro",     COLOR_MAGENTA), -1);
+    init_pair(SY_CLASS,     get_semantic_color("class",     COLOR_GREEN),   -1);
+    init_pair(SY_ENUM,      get_semantic_color("enum",      COLOR_GREEN),   -1);
+    init_pair(SY_NAMESPACE, get_semantic_color("namespace", 66),            -1);
+    init_pair(SY_VARIABLE,  get_semantic_color("variable",  COLOR_WHITE),   -1);
+    init_pair(SY_PARAMETER, get_semantic_color("parameter", 180),           -1);
+    init_pair(SY_PROPERTY,  get_semantic_color("property",  110),           -1);
 }
 
 int compute_gutter_width(size_t line_count) {

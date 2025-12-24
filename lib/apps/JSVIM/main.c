@@ -52,13 +52,26 @@ static int init_config_file(void) {
     if (!fp) {
         return -1;
     }
-    // Write default config with comments
-    fprintf(fp, "# JSVIM Configuration File\n");
-    fprintf(fp, "# \n");
-    fprintf(fp, "# Tab width setting:\n");
-    fprintf(fp, "#   -1 = use actual tab character (\\t)\n");
-    fprintf(fp, "#   >0 = number of spaces per tab (e.g., 2, 4, 8)\n");
-    fprintf(fp, "editor.tab=4\n");
+
+    // Default config: no LSP entries, tab=4, current semantic colors
+    fprintf(fp, "# Editor settings\n");
+    fprintf(fp, "editor.tab = 4\n");
+    fprintf(fp, "\n");
+    fprintf(fp, "# Editor Highlighing settings\n");
+    fprintf(fp, "editor.color.keyword = %d\n", COLOR_BLUE);
+    fprintf(fp, "editor.color.type = %d\n", COLOR_CYAN);
+    fprintf(fp, "editor.color.function = %d\n", COLOR_YELLOW);
+    fprintf(fp, "editor.color.string = %d\n", 127);
+    fprintf(fp, "editor.color.number = %d\n", 14);
+    fprintf(fp, "editor.color.comment = %d\n", 34);
+    fprintf(fp, "editor.color.operator = %d\n", COLOR_WHITE);
+    fprintf(fp, "editor.color.macro = %d\n", COLOR_MAGENTA);
+    fprintf(fp, "editor.color.class = %d\n", COLOR_GREEN);
+    fprintf(fp, "editor.color.enum = %d\n", COLOR_GREEN);
+    fprintf(fp, "editor.color.namespace = %d\n", 66);
+    fprintf(fp, "editor.color.variable = %d\n", COLOR_WHITE);
+    fprintf(fp, "editor.color.parameter = %d\n", 180);
+    fprintf(fp, "editor.color.property = %d\n", 110);
     fclose(fp);
     return 0;
 }

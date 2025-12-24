@@ -663,14 +663,20 @@ jsvim ./test.c
 * **Commands**:
 
   | Commands      | What it does                                         |
-  |     :---:     |       :---:                                          |
+  |     :---      |       :---                                           |
   | :q            | Quits the application without saving buffer          |
   | :w            | Writes the modified buffer to the file               |
   | :wq           | Writes the modified buffer and quits the application |
+  | :set rel      | Sets line numbers to relative                        |
+  | :set nu       | Sets line numbers to absolute                        |
+  | : <number\> ↑ | Travel <number\> amount of lines up (Arrow key)      |
+  | : <number\> ↓ | Travel <number\> amount of lines down (Arrow key)    |
+  | :go <number\> | Go to line at <number\> (absolute line number)       |
 
 <br>
 
 ### Notes
-* No shell invocation occurs for these commands (`system()` is only used internally in `update()` and `sys.sudo()` for convenience).
+* No shell invocation occurs for these commands (`execvp()` is only used internally in `update()`, `sys.sudo()`, `cmp.<compiler>()` and `apps.jsvim()`).
 * These primitives form the foundation for building more complex shell-like scripts in JSSH.
 * Installation of net-utils needs sudo on your system.
+* Installation of apps needs sudo on your system.
