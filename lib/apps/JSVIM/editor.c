@@ -6,6 +6,7 @@
 #include "highlight.h"
 #include "util.h"
 #include "render.h"
+
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -18,8 +19,18 @@
 // Static indent string buffer for tab/spaces
 static char s_indent_str[32] = "    ";  // default 4 spaces
 
-// Update editor.autosave in ~/.jsvimrc (1 = on, 0 = off)
-static void editor_update_autosave_config(int enabled) {
+// Recompute the editor.modified flag by comparing the current buffer
+// contents against the last clean snapshot (typically after load/save).
+static void editor_update_modified(EditorState *ed) {
+    if (buf_equals_snapshot(&ed->buf)) {
+        ed->modified = 0;
+    } else {
+        ed->modified = 1;
+    }
+}
+
+// Generic helper to update or add a single key=value in ~/.jsvimrc
+static void editor_update_config_key(const char *key, const char *value) {
     const char *home = getenv("HOME");
     if (!home) return;
 
@@ -27,53 +38,50 @@ static void editor_update_autosave_config(int enabled) {
     snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
 
     FILE *fp = fopen(config_path, "r");
-    if (!fp) {
-        // If the file does not exist, nothing to update
-        return;
-    }
 
-    // Read all non-autosave lines into memory
     char **lines = NULL;
     size_t line_cap = 0;
     size_t line_count = 0;
     char buf[512];
 
-    while (fgets(buf, sizeof(buf), fp)) {
-        char *line = dupstr(buf);
-        if (!line) continue;
+    if (fp) {
+        while (fgets(buf, sizeof(buf), fp)) {
+            char *line = dupstr(buf);
+            if (!line) continue;
 
-        char *p = line;
-        while (*p && isspace((unsigned char)*p)) p++;
-        if (*p != '#' && *p != '\0' && *p != '\n') {
-            // Check if this line is an editor.autosave setting
-            char *eq = strchr(p, '=');
-            if (eq) {
-                *eq = '\0';
-                char *key = p;
-                char *end = eq - 1;
-                while (end > key && isspace((unsigned char)*end)) *end-- = '\0';
-                if (strcmp(key, "editor.autosave") == 0) {
-                    free(line);
-                    continue; // skip existing autosave line
+            char *p = line;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (*p != '#' && *p != '\0' && *p != '\n') {
+                // Check if this line is a setting for the given key
+                char *eq = strchr(p, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char *trim_key = p;
+                    char *end = eq - 1;
+                    while (end > trim_key && isspace((unsigned char)*end)) *end-- = '\0';
+                    if (strcmp(trim_key, key) == 0) {
+                        free(line);
+                        continue; // skip existing line for this key
+                    }
+                    *eq = '='; // restore
                 }
-                *eq = '='; // restore
             }
+
+            if (line_count == line_cap) {
+                size_t new_cap = line_cap ? line_cap * 2 : 16;
+                char **new_lines = realloc(lines, new_cap * sizeof(char*));
+                if (!new_lines) {
+                    free(line);
+                    break;
+                }
+                lines = new_lines;
+                line_cap = new_cap;
+            }
+            lines[line_count++] = line;
         }
 
-        if (line_count == line_cap) {
-            size_t new_cap = line_cap ? line_cap * 2 : 16;
-            char **new_lines = realloc(lines, new_cap * sizeof(char*));
-            if (!new_lines) {
-                free(line);
-                break;
-            }
-            lines = new_lines;
-            line_cap = new_cap;
-        }
-        lines[line_count++] = line;
+        fclose(fp);
     }
-
-    fclose(fp);
 
     fp = fopen(config_path, "w");
     if (!fp) {
@@ -88,8 +96,15 @@ static void editor_update_autosave_config(int enabled) {
     }
     free(lines);
 
-    fprintf(fp, "editor.autosave=%d\n", enabled ? 1 : 0);
+    fprintf(fp, "%s=%s\n", key, value);
     fclose(fp);
+}
+
+// Update editor.autosave in ~/.jsvimrc (1 = on, 0 = off)
+static void editor_update_autosave_config(int enabled) {
+    char valbuf[16];
+    snprintf(valbuf, sizeof(valbuf), "%d", enabled ? 1 : 0);
+    editor_update_config_key("editor.autosave", valbuf);
 }
 
 void editor_init(EditorState *ed) {
@@ -112,6 +127,11 @@ void editor_init(EditorState *ed) {
     ed->tab_width = DEFAULT_TAB_WIDTH;  // default: 4 spaces
     ed->autosave_enabled = 0;
     ed->last_input_time = 0;
+
+    // Default history configuration
+    ed->history_location = 0;   // disk by default
+    ed->history_interval = 0;   // follow autosave by default
+    ed->last_history_snapshot_time = 0;
 }
 
 void editor_load_config(EditorState *ed) {
@@ -157,6 +177,12 @@ void editor_load_config(EditorState *ed) {
         } else if (strcmp(key, "editor.autosave") == 0) {
             int as_val = atoi(value);
             ed->autosave_enabled = (as_val != 0);
+        } else if (strcmp(key, "editor.history.location") == 0) {
+            int hv = atoi(value);
+            ed->history_location = (hv == 1) ? 1 : 0; // clamp to 0 or 1
+        } else if (strcmp(key, "editor.history.interval") == 0) {
+            int iv = atoi(value);
+            ed->history_interval = iv;
         }
     }
 
@@ -285,6 +311,27 @@ void editor_cleanup(EditorState *ed) {
 void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
     Buffer *buf = &ed->buf;
     
+    // Undo/redo keybindings (Ctrl+Z / Ctrl+Y) when history is enabled
+    if (ch == 26) { // Ctrl+Z
+        if (history_can_undo(&buf->history)) {
+            ed->suppress_history_record = 1;
+            if (history_undo(&buf->history, buf, &ed->cursor_line, &ed->cursor_col)) {
+                buf->lsp_dirty = 1;
+            }
+            ed->suppress_history_record = 0;
+        }
+        return;
+    } else if (ch == 25) { // Ctrl+Y
+        if (history_can_redo(&buf->history)) {
+            ed->suppress_history_record = 1;
+            if (history_redo(&buf->history, buf, &ed->cursor_line, &ed->cursor_col)) {
+                buf->lsp_dirty = 1;
+            }
+            ed->suppress_history_record = 0;
+        }
+        return;
+    }
+
     if (ch == 27) {
         // ESC -> command mode
         ed->mode_insert = 0;
@@ -579,8 +626,21 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         break;
     }
 
-    // If the buffer changed, re-highlight
+    // If the buffer changed, update history/modified flag and re-highlight
     if (buf->lsp_dirty) {
+        // Record this edit into history unless we're applying an
+        // undo/redo operation.
+        if (!ed->suppress_history_record && ed->history_interval != -1) {
+            time_t now = time(NULL);
+            history_record_edit(&buf->history, buf,
+                                ed->cursor_line, ed->cursor_col, now);
+        }
+
+        // Update modified state based on snapshot so that if the user
+        // reverts all changes back to the original contents, the
+        // modified flag is cleared.
+        editor_update_modified(ed);
+
         // Always do regex highlighting first (basic syntax)
         highlight_buffer(buf);
         
@@ -670,8 +730,10 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                             // proceed to save
                             if (save_file(buf, ed->filename) == 0) {
                                 ed->modified = 0;
+                                buf_set_snapshot(buf);
                                 ed->existing_file = 1;
                                 ed->file_created = 1;
+                                history_mark_clean(&buf->history);
                             } else {
                                 // show error briefly
                                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
@@ -684,7 +746,9 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                     } else {
                         if (save_file(buf, ed->filename) == 0) {
                             ed->modified = 0;
+                            buf_set_snapshot(buf);
                             ed->file_created = 1;
+                            history_mark_clean(&buf->history);
                         } else {
                             wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                             for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
@@ -732,9 +796,11 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                         } else {
                             if (save_file(buf, ed->filename) == 0) {
                                 ed->modified = 0;
+                                buf_set_snapshot(buf);
                                 ed->existing_file = 1;
                                 ed->file_created = 1;
                                 ed->quit = 1;
+                                history_mark_clean(&buf->history);
                             } else {
                                 wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                                 for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
@@ -746,8 +812,10 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                     } else {
                         if (save_file(buf, ed->filename) == 0) {
                             ed->modified = 0;
+                            buf_set_snapshot(buf);
                             ed->file_created = 1;
                             ed->quit = 1;
+                            history_mark_clean(&buf->history);
                         } else {
                             wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
                             for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
@@ -763,6 +831,13 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
             } else if (strcmp(ed->cmdbuf, "set nu") == 0) {
                 // set absolute line numbers
                 ed->line_number_relative = 0;
+            } else if (strcmp(ed->cmdbuf, "clearhistory") == 0) {
+                time_t now = time(NULL);
+                history_clear(&buf->history, buf,
+                              ed->cursor_line, ed->cursor_col, now);
+                history_mark_clean(&buf->history);
+            } else if (strcmp(ed->cmdbuf, "prunehistory") == 0) {
+                history_prune(&buf->history);
             } else if (strcmp(ed->cmdbuf, "autosave") == 0) {
                 // enable autosave and persist to config
                 ed->autosave_enabled = 1;
@@ -771,6 +846,45 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                 // disable autosave and persist to config
                 ed->autosave_enabled = 0;
                 editor_update_autosave_config(0);
+            } else if (strncmp(ed->cmdbuf, "set ", 4) == 0) {
+                // Extended :set key=value to write directly to ~/.jsvimrc
+                const char *expr = ed->cmdbuf + 4;
+                while (*expr && isspace((unsigned char)*expr)) expr++;
+                char *eq = strchr(expr, '=');
+                if (eq) {
+                    *eq = '\0';
+                    const char *key = expr;
+                    const char *val = eq + 1;
+
+                    // Trim whitespace
+                    while (*val && isspace((unsigned char)*val)) val++;
+                    char keybuf[128];
+                    char valbuf[128];
+                    snprintf(keybuf, sizeof(keybuf), "%s", key);
+                    snprintf(valbuf, sizeof(valbuf), "%s", val);
+
+                    // Persist to config
+                    editor_update_config_key(keybuf, valbuf);
+
+                    // Apply known keys to current session immediately
+                    if (strcmp(keybuf, "editor.autosave") == 0) {
+                        ed->autosave_enabled = atoi(valbuf) != 0;
+                    } else if (strcmp(keybuf, "editor.tab") == 0) {
+                        int tab_val = atoi(valbuf);
+                        if (tab_val == -1 || tab_val > 0) {
+                            ed->tab_width = tab_val;
+                        }
+                    } else if (strcmp(keybuf, "editor.history.location") == 0) {
+                        int hv = atoi(valbuf);
+                        ed->history_location = (hv == 1) ? 1 : 0;
+                        ed->buf.history.location = ed->history_location == 1
+                            ? HISTORY_LOCATION_MEMORY
+                            : HISTORY_LOCATION_DISK;
+                    } else if (strcmp(keybuf, "editor.history.interval") == 0) {
+                        ed->history_interval = atoi(valbuf);
+                        ed->buf.history.interval_minutes = ed->history_interval;
+                    }
+                }
             } else if (strncmp(ed->cmdbuf, "go ", 3) == 0) {
                 // go to line number: "go 100"
                 int line_num = atoi(ed->cmdbuf + 3);

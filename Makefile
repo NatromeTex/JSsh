@@ -104,7 +104,8 @@ JSVIM_SRC = lib/apps/JSVIM/main.c \
             lib/apps/JSVIM/language.c \
             lib/apps/JSVIM/util.c \
             lib/apps/JSVIM/semantic.c \
-            lib/apps/JSVIM/cJSON.c
+            lib/apps/JSVIM/cJSON.c \
+            lib/apps/JSVIM/history.c
 
 ifeq ($(APPS_ENABLED),yes)
 bin/jsvim: $(JSVIM_SRC)

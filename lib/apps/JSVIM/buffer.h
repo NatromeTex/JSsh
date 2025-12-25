@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include "semantic.h"
 #include "language.h"
+#include "history.h"
 
 #define MAX_LSP_TOKEN_TYPES 64
 
@@ -27,11 +28,16 @@ struct LSPProcess {
 };
 
 // Simple dynamic array of lines
-typedef struct {
+typedef struct Buffer {
     char **lines;
     size_t count;
     size_t cap;
     FileType ft;
+
+    // Snapshot of the buffer at the last "clean" state (e.g. after load/save)
+    char **saved_lines;
+    size_t saved_count;
+    size_t saved_cap;
 
     struct LSPProcess lsp;
 
@@ -53,6 +59,9 @@ typedef struct {
 
     SemanticKind lsp_token_map[MAX_LSP_TOKEN_TYPES];
     size_t lsp_token_map_len;
+
+    // Per-file local history (undo/redo, optional disk snapshots)
+    HistoryState history;
 } Buffer;
 
 // Buffer initialization and cleanup
@@ -73,5 +82,9 @@ void buf_add_diagnostic(Buffer *buf, int line, int col, int severity, const char
 // File operations
 int load_file(Buffer *b, const char *fname);
 int save_file(Buffer *b, const char *fname);
+
+// Snapshot operations: track buffer contents at last clean state
+void buf_set_snapshot(Buffer *b);
+int buf_equals_snapshot(const Buffer *b);
 
 #endif

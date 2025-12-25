@@ -14,6 +14,11 @@ void buf_init(Buffer *b) {
     b->count = 0;
     b->lines = malloc(sizeof(char*) * b->cap);
 
+    // Initialize snapshot storage
+    b->saved_lines = NULL;
+    b->saved_count = 0;
+    b->saved_cap = 0;
+
     // Filetype not known yet
     b->ft = FT_NONE;
 
@@ -43,6 +48,9 @@ void buf_init(Buffer *b) {
 
     // Initialize LSP token map
     b->lsp_token_map_len = 0;
+
+    // Initialize history state (filepath and mode will be set by editor)
+    memset(&b->history, 0, sizeof(b->history));
 }
 
 void buf_free(Buffer *b) {
@@ -54,6 +62,17 @@ void buf_free(Buffer *b) {
     b->lines = NULL;
     b->count = 0;
     b->cap = 0;
+
+    // Free snapshot lines
+    if (b->saved_lines) {
+        for (size_t i = 0; i < b->saved_count; i++) {
+            free(b->saved_lines[i]);
+        }
+        free(b->saved_lines);
+        b->saved_lines = NULL;
+    }
+    b->saved_count = 0;
+    b->saved_cap = 0;
 
     // Shut down LSP process if active
     if (b->lsp.pid > 0) {
@@ -90,6 +109,9 @@ void buf_free(Buffer *b) {
     b->tokens = NULL;
     b->token_count = 0;
     b->token_cap = 0;
+
+    // Free history state
+    history_free(&b->history);
 }
 
 void buf_ensure(Buffer *b, size_t need) {
@@ -158,4 +180,64 @@ int save_file(Buffer *b, const char *fname) {
     }
     fclose(fp);
     return 0;
+}
+
+// Take a snapshot of the current buffer contents as the "clean" state.
+void buf_set_snapshot(Buffer *b) {
+    // Free any existing snapshot
+    if (b->saved_lines) {
+        for (size_t i = 0; i < b->saved_count; i++) {
+            free(b->saved_lines[i]);
+        }
+        free(b->saved_lines);
+        b->saved_lines = NULL;
+    }
+    b->saved_count = 0;
+    b->saved_cap = 0;
+
+    // Empty buffer -> empty snapshot
+    if (b->count == 0) {
+        return;
+    }
+
+    b->saved_cap = b->count;
+    b->saved_lines = malloc(sizeof(char*) * b->saved_cap);
+    if (!b->saved_lines) {
+        // On allocation failure, leave snapshot empty; modified logic will
+        // conservatively treat the buffer as modified.
+        b->saved_cap = 0;
+        return;
+    }
+
+    for (size_t i = 0; i < b->count; i++) {
+        b->saved_lines[i] = dupstr(b->lines[i]);
+        if (!b->saved_lines[i]) {
+            // Roll back on failure
+            for (size_t j = 0; j < i; j++) {
+                free(b->saved_lines[j]);
+            }
+            free(b->saved_lines);
+            b->saved_lines = NULL;
+            b->saved_count = 0;
+            b->saved_cap = 0;
+            return;
+        }
+    }
+    b->saved_count = b->count;
+}
+
+// Compare current buffer contents to the last snapshot.
+int buf_equals_snapshot(const Buffer *b) {
+    // If no snapshot has been recorded yet, conservatively report not equal
+    // unless the buffer is also empty.
+    if (!b->saved_lines && b->saved_count == 0) {
+        return (b->count == 0) ? 1 : 0;
+    }
+
+    if (b->saved_count != b->count) return 0;
+
+    for (size_t i = 0; i < b->count; i++) {
+        if (strcmp(b->lines[i], b->saved_lines[i]) != 0) return 0;
+    }
+    return 1;
 }

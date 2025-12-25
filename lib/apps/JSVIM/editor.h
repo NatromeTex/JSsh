@@ -33,6 +33,14 @@ typedef struct {
 
     int autosave_enabled;  // 1 = autosave on, 0 = off
     time_t last_input_time; // last time we received user input
+
+    // Local history configuration
+    int history_location;   // 0 = disk, 1 = memory
+    int history_interval;   // -1 = disable disk snapshots, 0 = follow autosave, >0 = minutes
+    time_t last_history_snapshot_time; // last time we wrote a disk snapshot
+
+    // Internal flag used to avoid recording history entries for undo/redo
+    int suppress_history_record;
 } EditorState;
 
 // Load editor configuration from ~/.jsvimrc

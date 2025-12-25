@@ -2,7 +2,7 @@
 /* When I was in college, our first UNIX Class had us coding in bash, awk and all those god-awful
 *  Scripting languages. One thing was common in all those scripts though, vi, the simple text editor
 *  That runs in the terminal with such unintuitive controls I swear to god Tax codes are more clearer
-*  on the matter. While I am sure you can rebind the controls but First impressions last...
+*  on the matter. While I am sure you can rebind the controls but first impressions last...
 */
 
 #include <ncurses.h>
@@ -54,10 +54,12 @@ static int init_config_file(void) {
         return -1;
     }
 
-    // Default config: no LSP entries, tab=4, current semantic colors
+    // Default config: no LSP entries, tab=4, autosave off, history on disk
     fprintf(fp, "# Editor settings\n");
     fprintf(fp, "editor.tab = 4\n");
     fprintf(fp, "editor.autosave = 0\n");
+    fprintf(fp, "editor.history.location = 0\n");  // 0 = disk, 1 = memory
+    fprintf(fp, "editor.history.interval = 4\n");  // -1 = off, 0 = follow autosave, >0 = interval in minutes, default save diff every 4 minutes
     fprintf(fp, "\n");
     fprintf(fp, "# Editor Highlighing settings\n");
     fprintf(fp, "editor.color.keyword = %d\n", COLOR_BLUE);
@@ -77,6 +79,14 @@ static int init_config_file(void) {
     fclose(fp);
     return 0;
 }
+
+/* So two and a half years after I first used vi I still prefered VSCode for my code editing, funnily JSVIM and JSsh are both
+*  developed fully in VSCode. While developing a rather eccentric app for a government entity running RHEL 6.9 (nice) and python2
+*  which were obsolete in 2013, not released, obsolete, still being used in 2025 (They changed to a newer linux now) I discovered 
+*  the ncurses library, it was like the pieces I needed for my stupid idea literally walked upto me offered itself to my disposal.
+*  I made a very crude attempt at making a better vi or vim with chatGPT at that time, but it was a hilarious failure. 4 months later
+*  and over the course of maybe 2-3 weeks, that dream will finally be seen through...
+*/
 
 int main(int argc, char **argv) {
     EditorState ed;
@@ -150,6 +160,23 @@ int main(int argc, char **argv) {
                 ed.file_created = 1;
             }
         }
+    }
+
+    // Record the initial clean snapshot of the buffer so that the
+    // modified flag can be derived from actual content changes.
+    buf_set_snapshot(&ed.buf);
+
+    // Initialize per-file history for this buffer
+    {
+        HistoryLocation loc = ed.history_location == 1
+            ? HISTORY_LOCATION_MEMORY
+            : HISTORY_LOCATION_DISK;
+        history_init(&ed.buf.history, ed.filename, loc, ed.history_interval);
+
+        time_t now = time(NULL);
+        history_record_edit(&ed.buf.history, &ed.buf,
+                            ed.cursor_line, ed.cursor_col, now);
+        history_mark_clean(&ed.buf.history);
     }
     
     ed.buf.ft = detect_filetype(ed.filename);
@@ -253,6 +280,9 @@ int main(int argc, char **argv) {
                     if (now2 - ed.last_input_time >= 2) {
                         if (save_file(&ed.buf, ed.filename) == 0) {
                             ed.modified = 0;
+                            // Update snapshot to the newly saved contents
+                            buf_set_snapshot(&ed.buf);
+                            history_mark_clean(&ed.buf.history);
                         }
                     }
                 }
