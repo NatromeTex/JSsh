@@ -6,6 +6,7 @@ JSVIM is a lightweight terminal-based text editor built with ncurses, designed a
 
 - **Modal Editing**: Insert and command modes similar to vim
 - **Syntax Highlighting**: Regex-based highlighting for multiple languages
+_ **Autosave**: Autosaves modified buffer every 2 seconds
 - **LSP Integration**: Deep semantic highlighting for C/C++ via clangd
 - **Configurable LSP Servers**: User-defined language servers via `~/.jsvimrc`
 - **File Type Detection**: Automatic language detection based on file extension

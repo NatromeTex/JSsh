@@ -3,6 +3,7 @@
 #define EDITOR_H
 
 #include <ncurses.h>
+#include <time.h>
 #include "buffer.h"
 
 // Editor state structure
@@ -29,6 +30,9 @@ typedef struct {
     int pending_create_prompt; // 1 if waiting for user to confirm file creation
     
     int tab_width;  // -1 = use \t, >0 = number of spaces per tab
+
+    int autosave_enabled;  // 1 = autosave on, 0 = off
+    time_t last_input_time; // last time we received user input
 } EditorState;
 
 // Load editor configuration from ~/.jsvimrc

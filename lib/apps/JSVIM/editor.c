@@ -18,6 +18,80 @@
 // Static indent string buffer for tab/spaces
 static char s_indent_str[32] = "    ";  // default 4 spaces
 
+// Update editor.autosave in ~/.jsvimrc (1 = on, 0 = off)
+static void editor_update_autosave_config(int enabled) {
+    const char *home = getenv("HOME");
+    if (!home) return;
+
+    char config_path[1024];
+    snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
+
+    FILE *fp = fopen(config_path, "r");
+    if (!fp) {
+        // If the file does not exist, nothing to update
+        return;
+    }
+
+    // Read all non-autosave lines into memory
+    char **lines = NULL;
+    size_t line_cap = 0;
+    size_t line_count = 0;
+    char buf[512];
+
+    while (fgets(buf, sizeof(buf), fp)) {
+        char *line = dupstr(buf);
+        if (!line) continue;
+
+        char *p = line;
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (*p != '#' && *p != '\0' && *p != '\n') {
+            // Check if this line is an editor.autosave setting
+            char *eq = strchr(p, '=');
+            if (eq) {
+                *eq = '\0';
+                char *key = p;
+                char *end = eq - 1;
+                while (end > key && isspace((unsigned char)*end)) *end-- = '\0';
+                if (strcmp(key, "editor.autosave") == 0) {
+                    free(line);
+                    continue; // skip existing autosave line
+                }
+                *eq = '='; // restore
+            }
+        }
+
+        if (line_count == line_cap) {
+            size_t new_cap = line_cap ? line_cap * 2 : 16;
+            char **new_lines = realloc(lines, new_cap * sizeof(char*));
+            if (!new_lines) {
+                free(line);
+                break;
+            }
+            lines = new_lines;
+            line_cap = new_cap;
+        }
+        lines[line_count++] = line;
+    }
+
+    fclose(fp);
+
+    fp = fopen(config_path, "w");
+    if (!fp) {
+        for (size_t i = 0; i < line_count; i++) free(lines[i]);
+        free(lines);
+        return;
+    }
+
+    for (size_t i = 0; i < line_count; i++) {
+        fputs(lines[i], fp);
+        free(lines[i]);
+    }
+    free(lines);
+
+    fprintf(fp, "editor.autosave=%d\n", enabled ? 1 : 0);
+    fclose(fp);
+}
+
 void editor_init(EditorState *ed) {
     buf_init(&ed->buf);
     ed->filename[0] = '\0';
@@ -36,6 +110,8 @@ void editor_init(EditorState *ed) {
     ed->file_created = 0;
     ed->pending_create_prompt = 0;
     ed->tab_width = DEFAULT_TAB_WIDTH;  // default: 4 spaces
+    ed->autosave_enabled = 0;
+    ed->last_input_time = 0;
 }
 
 void editor_load_config(EditorState *ed) {
@@ -78,6 +154,9 @@ void editor_load_config(EditorState *ed) {
             if (tab_val == -1 || tab_val > 0) {
                 ed->tab_width = tab_val;
             }
+        } else if (strcmp(key, "editor.autosave") == 0) {
+            int as_val = atoi(value);
+            ed->autosave_enabled = (as_val != 0);
         }
     }
 
@@ -684,6 +763,14 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
             } else if (strcmp(ed->cmdbuf, "set nu") == 0) {
                 // set absolute line numbers
                 ed->line_number_relative = 0;
+            } else if (strcmp(ed->cmdbuf, "autosave") == 0) {
+                // enable autosave and persist to config
+                ed->autosave_enabled = 1;
+                editor_update_autosave_config(1);
+            } else if (strcmp(ed->cmdbuf, "!autosave") == 0) {
+                // disable autosave and persist to config
+                ed->autosave_enabled = 0;
+                editor_update_autosave_config(0);
             } else if (strncmp(ed->cmdbuf, "go ", 3) == 0) {
                 // go to line number: "go 100"
                 int line_num = atoi(ed->cmdbuf + 3);

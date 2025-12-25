@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "util.h"
 #include "buffer.h"
@@ -56,6 +57,7 @@ static int init_config_file(void) {
     // Default config: no LSP entries, tab=4, current semantic colors
     fprintf(fp, "# Editor settings\n");
     fprintf(fp, "editor.tab = 4\n");
+    fprintf(fp, "editor.autosave = 0\n");
     fprintf(fp, "\n");
     fprintf(fp, "# Editor Highlighing settings\n");
     fprintf(fp, "editor.color.keyword = %d\n", COLOR_BLUE);
@@ -215,6 +217,7 @@ int main(int argc, char **argv) {
                              ed.pending_create_prompt, ed.filename);
 
         // Position cursor and get input
+        time_t now = time(NULL);
         if (ed.mode_insert) {
             // clamp cy to visible text area bounds
             if (cy < 1) cy = 1;
@@ -223,6 +226,9 @@ int main(int argc, char **argv) {
             wrefresh(cmd_win);
             wrefresh(main_win);
             ch = wgetch(main_win);
+            if (ch != ERR) {
+                ed.last_input_time = now;
+            }
             editor_handle_insert_mode(&ed, ch, visible_rows);
         } else {
             // place cursor in command window
@@ -234,8 +240,23 @@ int main(int argc, char **argv) {
             wrefresh(main_win);
             wrefresh(cmd_win);
             ch = wgetch(cmd_win);
+                if (ch != ERR) {
+                    ed.last_input_time = now;
+                }
             editor_handle_command_mode(&ed, ch, cmd_win, maxx);
         }
+
+            // Autosave: save after 2 seconds of inactivity since last input
+            if (ed.autosave_enabled && ed.modified && ed.have_filename && ed.file_created) {
+                if (ed.last_input_time != 0) {
+                    time_t now2 = time(NULL);
+                    if (now2 - ed.last_input_time >= 2) {
+                        if (save_file(&ed.buf, ed.filename) == 0) {
+                            ed.modified = 0;
+                        }
+                    }
+                }
+            }
     }
 
     // Cleanup

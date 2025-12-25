@@ -662,16 +662,18 @@ jsvim ./test.c
 
 * **Commands**:
 
-  | Commands      | What it does                                         |
-  |     :---      |       :---                                           |
-  | :q            | Quits the application without saving buffer          |
-  | :w            | Writes the modified buffer to the file               |
-  | :wq           | Writes the modified buffer and quits the application |
-  | :set rel      | Sets line numbers to relative                        |
-  | :set nu       | Sets line numbers to absolute                        |
-  | : <number\> ↑ | Travel <number\> amount of lines up (Arrow key)      |
-  | : <number\> ↓ | Travel <number\> amount of lines down (Arrow key)    |
-  | :go <number\> | Go to line at <number\> (absolute line number)       |
+  | Commands      | What it does                                                  |
+  |     :---      |       :---                                                    |
+  | :q            | Quits the application without saving buffer                   |
+  | :w            | Writes the modified buffer to the file                        |
+  | :wq           | Writes the modified buffer and quits the application          |
+  | :set rel      | Sets line numbers to relative                                 |
+  | :set nu       | Sets line numbers to absolute                                 |
+  | : <number\> ↑ | Travel <number\> amount of lines up (Arrow key)               |
+  | : <number\> ↓ | Travel <number\> amount of lines down (Arrow key)             |
+  | :go <number\> | Go to line at <number\> (absolute line number)                |
+  | :autosave>    | Autosaves modified file buffer after 2 seconds of inactivity  |
+  | :!autosave>   | Turns off autosave                                            |
 
 <br>
 
