@@ -166,8 +166,14 @@ void history_free(HistoryState *hs) {
 }
 
 // Persist a single node snapshot to the per-file on-disk history.
-// Each record encodes: NODE <id> <parent-id> <timestamp>
-// followed by LINES <n> and n lines of text, then END.
+// Each record encodes a minimal line-based diff against the parent node:
+//   DIFF <id> <parent-id> <timestamp> <start> <del> <add>
+//   LINES <add>
+//     <added-line-0>
+//     ...
+//   END
+// For the root node (parent-id = -1), this represents insertion of the
+// entire buffer at line 0.
 static void history_persist_node(HistoryState *hs, HistoryNode *node) {
     if (!hs || !node) return;
     if (hs->location != HISTORY_LOCATION_DISK) return;
@@ -179,11 +185,46 @@ static void history_persist_node(HistoryState *hs, HistoryNode *node) {
     FILE *fp = fopen(path, "a");
     if (!fp) return;
 
+    // Compute a simple 3-way diff between parent and this node:
+    // longest common prefix and suffix of lines, changed middle.
+    char **old_lines = NULL;
+    size_t old_count = 0;
+    if (node->parent) {
+        old_lines = node->parent->lines;
+        old_count = node->parent->line_count;
+    }
+
+    char **new_lines = node->lines;
+    size_t new_count = node->line_count;
+
+    size_t prefix = 0;
+    while (prefix < old_count && prefix < new_count) {
+        const char *a = old_lines[prefix] ? old_lines[prefix] : "";
+        const char *b = new_lines[prefix] ? new_lines[prefix] : "";
+        if (strcmp(a, b) != 0) break;
+        prefix++;
+    }
+
+    size_t old_suffix = old_count;
+    size_t new_suffix = new_count;
+    while (old_suffix > prefix && new_suffix > prefix) {
+        const char *a = old_lines[old_suffix - 1] ? old_lines[old_suffix - 1] : "";
+        const char *b = new_lines[new_suffix - 1] ? new_lines[new_suffix - 1] : "";
+        if (strcmp(a, b) != 0) break;
+        old_suffix--;
+        new_suffix--;
+    }
+
+    size_t start = prefix;
+    size_t del = old_count - old_suffix;
+    size_t add = new_suffix - prefix;
+
     int parent_id = node->parent ? node->parent->id : -1;
-    fprintf(fp, "NODE %d %d %ld\n", node->id, parent_id, (long)node->timestamp);
-    fprintf(fp, "LINES %zu\n", node->line_count);
-    for (size_t i = 0; i < node->line_count; i++) {
-        const char *line = node->lines[i] ? node->lines[i] : "";
+    fprintf(fp, "DIFF %d %d %ld %zu %zu %zu\n",
+            node->id, parent_id, (long)node->timestamp, start, del, add);
+    fprintf(fp, "LINES %zu\n", add);
+    for (size_t i = 0; i < add; i++) {
+        const char *line = new_lines[prefix + i] ? new_lines[prefix + i] : "";
         fputs(line, fp);
         fputc('\n', fp);
     }
@@ -290,8 +331,14 @@ void history_clear(HistoryState *hs, struct Buffer *buf,
     hs->current = NULL;
     hs->node_count = 0;
 
+    // Reset id sequence so that the new root and its descendants
+    // form a clean, self-consistent history chain for both in-memory
+    // and on-disk diff records.
+    hs->next_id = 1;
+
     HistoryNode *root = history_clone_from_buffer(buf, cursor_line, cursor_col, now);
     if (!root) return;
+    root->id = hs->next_id++;
     hs->root = root;
     hs->current = root;
     hs->node_count = 1;
