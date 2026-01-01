@@ -674,6 +674,8 @@ jsvim ./test.c
   | :go <number\> | Go to line at <number\> (absolute line number)                |
   | :autosave>    | Autosaves modified file buffer after 2 seconds of inactivity  |
   | :!autosave>   | Turns off autosave                                            |
+  | :u            | undo edits (pressing enter is not required)                   |
+  | :r            | redo edits (pressing enter is not required)                   |
 
 <br>
 

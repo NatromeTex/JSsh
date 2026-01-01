@@ -210,8 +210,13 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
             display_num = lineno + 1;
         }
 
-        // highlight line number when diagnostics exist on this line
-        if (diag_severity == 1) {
+        // highlight current line number in command mode; otherwise use diagnostics/gutter colors
+        int is_cursor_line = (!mode_insert && lineno == cursor_line);
+        if (is_cursor_line) {
+            wattron(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+            mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
+            wattroff(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+        } else if (diag_severity == 1) {
             wattron(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
             mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
             wattroff(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
@@ -233,7 +238,11 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
                 // wrap
                 row++;
                 if (row >= maxy - 2) break;
-                if (diag_severity == 1) {
+                if (is_cursor_line) {
+                    wattron(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
+                    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
+                } else if (diag_severity == 1) {
                     wattron(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
                     mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
                     wattroff(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));

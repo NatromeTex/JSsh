@@ -6,6 +6,41 @@
 #include <time.h>
 #include "buffer.h"
 
+typedef struct {
+    size_t line;
+    size_t col;
+} CursorPos;
+
+typedef struct {
+    // Range in buffer coordinates BEFORE the edit
+    size_t pre_start_line;
+    size_t pre_start_col;
+    size_t pre_end_line;
+    size_t pre_end_col;
+    // Range in buffer coordinates AFTER the edit
+    size_t post_start_line;
+    size_t post_start_col;
+    size_t post_end_line;
+    size_t post_end_col;
+    // Text replaced: old_text (pre range contents) -> new_text (post range contents)
+    char *old_text;
+    char *new_text;
+    CursorPos cursor_before;
+    CursorPos cursor_after;
+} UndoDelta;
+
+typedef struct {
+    UndoDelta *deltas;
+    size_t count;
+    size_t cap;
+} UndoEntry;
+
+typedef struct {
+    UndoEntry *entries;
+    size_t size;   // number of valid entries
+    size_t index;  // current history position (0..size)
+} UndoHistory;
+
 // Editor state structure
 typedef struct {
     Buffer buf;
@@ -33,6 +68,12 @@ typedef struct {
 
     int autosave_enabled;  // 1 = autosave on, 0 = off
     time_t last_input_time; // last time we received user input
+
+    // Undo/redo configuration
+    int edit_group_timeout; // milliseconds to group rapid edits
+    UndoHistory history;
+    long long last_edit_time_ms;
+    int has_last_edit_time;
 } EditorState;
 
 // Load editor configuration from ~/.jsvimrc
@@ -52,6 +93,10 @@ void editor_init(EditorState *ed);
 
 // Cleanup editor state
 void editor_cleanup(EditorState *ed);
+
+// Undo/redo operations
+void editor_undo(EditorState *ed);
+void editor_redo(EditorState *ed);
 
 // Handle input in insert mode
 void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows);

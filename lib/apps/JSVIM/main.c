@@ -58,6 +58,7 @@ static int init_config_file(void) {
     fprintf(fp, "# Editor settings\n");
     fprintf(fp, "editor.tab = 4\n");
     fprintf(fp, "editor.autosave = 0\n");
+    fprintf(fp, "editor.edit_group_timeout = 500\n");
     fprintf(fp, "\n");
     fprintf(fp, "# Editor Highlighing settings\n");
     fprintf(fp, "editor.color.keyword = %d\n", COLOR_BLUE);

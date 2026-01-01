@@ -415,7 +415,7 @@ static LanguageHighlighter *all_highlighters[] = {
 
 # Adding LSP Support for a Language
 
-To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features, you have two options:
+To enable LSP (Language Server Protocol) support for semantic highlighting, diagnostics, and other advanced features:
 
 ## User Configuration (Recommended)
 

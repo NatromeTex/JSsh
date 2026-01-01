@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#include <time.h>
+#include <sys/time.h>
+
 #define JSVIM_CONFIG_FILE ".jsvimrc"
 #define DEFAULT_TAB_WIDTH 4
 
@@ -32,11 +35,12 @@ static void editor_update_autosave_config(int enabled) {
         return;
     }
 
-    // Read all non-autosave lines into memory
+    // Read all lines into memory, updating editor.autosave in-place if present
     char **lines = NULL;
     size_t line_cap = 0;
     size_t line_count = 0;
     char buf[512];
+    int found_autosave = 0;
 
     while (fgets(buf, sizeof(buf), fp)) {
         char *line = dupstr(buf);
@@ -45,7 +49,6 @@ static void editor_update_autosave_config(int enabled) {
         char *p = line;
         while (*p && isspace((unsigned char)*p)) p++;
         if (*p != '#' && *p != '\0' && *p != '\n') {
-            // Check if this line is an editor.autosave setting
             char *eq = strchr(p, '=');
             if (eq) {
                 *eq = '\0';
@@ -53,10 +56,13 @@ static void editor_update_autosave_config(int enabled) {
                 char *end = eq - 1;
                 while (end > key && isspace((unsigned char)*end)) *end-- = '\0';
                 if (strcmp(key, "editor.autosave") == 0) {
+                    char new_line[64];
+                    snprintf(new_line, sizeof(new_line), "editor.autosave = %d\n", enabled ? 1 : 0);
                     free(line);
-                    continue; // skip existing autosave line
+                    line = dupstr(new_line);
+                    found_autosave = 1;
                 }
-                *eq = '='; // restore
+                *eq = '='; // restore (for non-autosave lines)
             }
         }
 
@@ -88,7 +94,10 @@ static void editor_update_autosave_config(int enabled) {
     }
     free(lines);
 
-    fprintf(fp, "editor.autosave=%d\n", enabled ? 1 : 0);
+    // If there was no existing editor.autosave line, append one
+    if (!found_autosave) {
+        fprintf(fp, "editor.autosave = %d\n", enabled ? 1 : 0);
+    }
     fclose(fp);
 }
 
@@ -112,6 +121,15 @@ void editor_init(EditorState *ed) {
     ed->tab_width = DEFAULT_TAB_WIDTH;  // default: 4 spaces
     ed->autosave_enabled = 0;
     ed->last_input_time = 0;
+    ed->edit_group_timeout = 500;
+
+    ed->history.entries = NULL;
+    ed->history.size = 0;
+    ed->history.index = 0;
+    ed->history.size = 0;
+    ed->history.index = 0;
+    ed->last_edit_time_ms = 0;
+    ed->has_last_edit_time = 0;
 }
 
 void editor_load_config(EditorState *ed) {
@@ -157,6 +175,11 @@ void editor_load_config(EditorState *ed) {
         } else if (strcmp(key, "editor.autosave") == 0) {
             int as_val = atoi(value);
             ed->autosave_enabled = (as_val != 0);
+        } else if (strcmp(key, "editor.edit_group_timeout") == 0) {
+            int timeout_val = atoi(value);
+            if (timeout_val > 0) {
+                ed->edit_group_timeout = timeout_val;
+            }
         }
     }
 
@@ -280,6 +303,332 @@ char *editor_auto_indent(EditorState *ed, const char *prev_line) {
 void editor_cleanup(EditorState *ed) {
     stop_lsp(&ed->buf.lsp);
     buf_free(&ed->buf);
+
+    for (size_t i = 0; i < ed->history.size; i++) {
+        UndoEntry *e = &ed->history.entries[i];
+        for (size_t j = 0; j < e->count; j++) {
+            free(e->deltas[j].old_text);
+            free(e->deltas[j].new_text);
+        }
+        free(e->deltas);
+    }
+    free(ed->history.entries);
+}
+
+static long long now_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+static void history_clear_from_index(UndoHistory *h, size_t index) {
+    if (index >= h->size) return;
+    for (size_t i = index; i < h->size; i++) {
+        UndoEntry *e = &h->entries[i];
+        for (size_t j = 0; j < e->count; j++) {
+            free(e->deltas[j].old_text);
+            free(e->deltas[j].new_text);
+        }
+        free(e->deltas);
+    }
+    h->size = index;
+}
+
+static void history_append_delta(EditorState *ed, UndoDelta *delta) {
+    UndoHistory *h = &ed->history;
+
+    // drop any redo entries beyond current index
+    if (h->index < h->size) {
+        history_clear_from_index(h, h->index);
+    }
+
+    long long now = now_ms();
+
+    int start_new_entry = 0;
+    if (!ed->has_last_edit_time) {
+        start_new_entry = 1;
+    } else {
+        long long diff = now - ed->last_edit_time_ms;
+        if (diff < 0 || diff > ed->edit_group_timeout) {
+            start_new_entry = 1;
+        }
+    }
+
+    if (start_new_entry || h->size == 0) {
+        if (h->size == h->index) {
+            size_t new_cap = h->size ? h->size * 2 : 8;
+            if (new_cap < h->size + 1) new_cap = h->size + 1;
+            UndoEntry *ne = realloc(h->entries, new_cap * sizeof(UndoEntry));
+            if (!ne) return;
+            h->entries = ne;
+        }
+        UndoEntry *e = &h->entries[h->size];
+        e->deltas = malloc(sizeof(UndoDelta));
+        if (!e->deltas) return;
+        e->count = 1;
+        e->cap = 1;
+        e->deltas[0] = *delta;
+        h->size++;
+        h->index = h->size;
+    } else {
+        UndoEntry *e = &h->entries[h->size - 1];
+        if (e->count == e->cap) {
+            size_t new_cap = e->cap ? e->cap * 2 : 4;
+            UndoDelta *nd = realloc(e->deltas, new_cap * sizeof(UndoDelta));
+            if (!nd) return;
+            e->deltas = nd;
+            e->cap = new_cap;
+        }
+        e->deltas[e->count++] = *delta;
+        h->index = h->size;
+    }
+
+    ed->last_edit_time_ms = now;
+    ed->has_last_edit_time = 1;
+}
+
+static char *collect_text_range(Buffer *buf,
+                                size_t start_line, size_t start_col,
+                                size_t end_line, size_t end_col) {
+    if (start_line > end_line || start_line >= buf->count || end_line >= buf->count)
+        return NULL;
+
+    size_t total = 0;
+    for (size_t ln = start_line; ln <= end_line; ln++) {
+        const char *s = buf->lines[ln];
+        size_t len = strlen(s);
+        size_t from = (ln == start_line) ? start_col : 0;
+        size_t to = (ln == end_line) ? end_col : len;
+        if (to > len) to = len;
+        if (to > from) total += (to - from);
+        if (ln != end_line) total++; // newline
+    }
+    char *out = malloc(total + 1);
+    if (!out) return NULL;
+    size_t pos = 0;
+    for (size_t ln = start_line; ln <= end_line; ln++) {
+        const char *s = buf->lines[ln];
+        size_t len = strlen(s);
+        size_t from = (ln == start_line) ? start_col : 0;
+        size_t to = (ln == end_line) ? end_col : len;
+        if (to > len) to = len;
+        if (to > from) {
+            memcpy(out + pos, s + from, to - from);
+            pos += to - from;
+        }
+        if (ln != end_line) {
+            out[pos++] = '\n';
+        }
+    }
+    out[pos] = '\0';
+    return out;
+}
+
+static void apply_text_replace(Buffer *buf,
+                               size_t start_line, size_t start_col,
+                               size_t end_line, size_t end_col,
+                               const char *new_text) {
+    if (start_line > end_line || start_line >= buf->count || end_line >= buf->count)
+        return;
+
+    // First, remove the specified range
+    if (start_line == end_line) {
+        char *line = buf->lines[start_line];
+        size_t len = strlen(line);
+        if (start_col > len) start_col = len;
+        if (end_col > len) end_col = len;
+        if (end_col > start_col) {
+            memmove(line + start_col, line + end_col, len - end_col + 1);
+        }
+    } else {
+        char *first = buf->lines[start_line];
+        char *last = buf->lines[end_line];
+        size_t first_len = strlen(first);
+        size_t last_len = strlen(last);
+        if (start_col > first_len) start_col = first_len;
+        if (end_col > last_len) end_col = last_len;
+
+        // Keep prefix of first line and suffix of last line
+        size_t prefix_len = start_col;
+        size_t suffix_len = last_len - end_col;
+        char *merged = malloc(prefix_len + suffix_len + 1);
+        if (!merged) return;
+        memcpy(merged, first, prefix_len);
+        memcpy(merged + prefix_len, last + end_col, suffix_len + 1);
+
+        free(first);
+        free(last);
+        for (size_t ln = start_line + 1; ln <= end_line; ln++) {
+            for (size_t i = ln; i + 1 < buf->count; i++) {
+                buf->lines[i] = buf->lines[i + 1];
+            }
+            buf->count--;
+            end_line--;
+            ln--;
+        }
+        buf->lines[start_line] = merged;
+    }
+
+    // Then insert new_text at start position
+    if (!new_text || !*new_text)
+        return;
+
+    char *text_copy = dupstr(new_text);
+    if (!text_copy) return;
+
+    size_t current_line = start_line;
+    size_t insert_col = start_col;
+    char *seg_start = text_copy;
+    char *p = text_copy;
+    int first_segment = 1;
+
+    while (1) {
+        if (*p == '\n' || *p == '\0') {
+            size_t seg_len = (size_t)(p - seg_start);
+
+            if (first_segment) {
+                // First segment: either insert into existing line, or if empty and
+                // starting with a newline, begin on a new line instead.
+                if (seg_len > 0) {
+                    char *line = buf->lines[current_line];
+                    size_t line_len = strlen(line);
+                    if (insert_col > line_len) insert_col = line_len;
+                    line = realloc(line, line_len + seg_len + 1);
+                    memmove(line + insert_col + seg_len, line + insert_col,
+                            line_len - insert_col + 1);
+                    memcpy(line + insert_col, seg_start, seg_len);
+                    buf->lines[current_line] = line;
+                    insert_col += seg_len;
+                }
+                // If seg_len == 0 (i.e., text starts with '\n'), we just move to
+                // the next line on the next segment without modifying this line.
+                first_segment = 0;
+            } else {
+                // Subsequent segments always become their own lines
+                char *newline = malloc(seg_len + 1);
+                if (!newline) {
+                    break;
+                }
+                memcpy(newline, seg_start, seg_len);
+                newline[seg_len] = '\0';
+                buf_insert(buf, current_line + 1, newline);
+                current_line += 1;
+                insert_col = seg_len;
+            }
+
+            if (*p == '\0') {
+                break;
+            }
+            seg_start = p + 1;
+        }
+        p++;
+    }
+
+    free(text_copy);
+}
+
+static void record_replace(EditorState *ed,
+                           size_t pre_start_line, size_t pre_start_col,
+                           size_t pre_end_line, size_t pre_end_col,
+                           const char *new_text,
+                           CursorPos cursor_before,
+                           CursorPos cursor_after) {
+    Buffer *buf = &ed->buf;
+
+    UndoDelta delta;
+    delta.pre_start_line = pre_start_line;
+    delta.pre_start_col = pre_start_col;
+    delta.pre_end_line = pre_end_line;
+    delta.pre_end_col = pre_end_col;
+
+    delta.old_text = collect_text_range(buf, pre_start_line, pre_start_col,
+                                        pre_end_line, pre_end_col);
+    if (!delta.old_text) {
+        return;
+    }
+
+    if (new_text && *new_text) {
+        delta.new_text = dupstr(new_text);
+        if (!delta.new_text) {
+            free(delta.old_text);
+            return;
+        }
+    } else {
+        delta.new_text = dupstr("");
+        if (!delta.new_text) {
+            free(delta.old_text);
+            return;
+        }
+    }
+
+    // Compute post-edit range by simulating insertion of new_text at pre_start
+    size_t line = pre_start_line;
+    size_t col = pre_start_col;
+    if (new_text) {
+        for (const char *p = new_text; *p; p++) {
+            if (*p == '\n') {
+                line++;
+                col = 0;
+            } else {
+                col++;
+            }
+        }
+    }
+    delta.post_start_line = pre_start_line;
+    delta.post_start_col = pre_start_col;
+    delta.post_end_line = line;
+    delta.post_end_col = col;
+
+    delta.cursor_before = cursor_before;
+    delta.cursor_after = cursor_after;
+
+    history_append_delta(ed, &delta);
+}
+
+static void apply_delta_forward(EditorState *ed, UndoDelta *d) {
+    apply_text_replace(&ed->buf,
+                       d->pre_start_line, d->pre_start_col,
+                       d->pre_end_line, d->pre_end_col,
+                       d->new_text);
+    ed->cursor_line = d->cursor_after.line;
+    ed->cursor_col = d->cursor_after.col;
+}
+
+static void apply_delta_backward(EditorState *ed, UndoDelta *d) {
+    apply_text_replace(&ed->buf,
+                       d->post_start_line, d->post_start_col,
+                       d->post_end_line, d->post_end_col,
+                       d->old_text);
+    ed->cursor_line = d->cursor_before.line;
+    ed->cursor_col = d->cursor_before.col;
+}
+
+void editor_undo(EditorState *ed) {
+    UndoHistory *h = &ed->history;
+    if (h->index == 0) return;
+
+    UndoEntry *e = &h->entries[h->index - 1];
+    for (size_t i = e->count; i > 0; i--) {
+        apply_delta_backward(ed, &e->deltas[i - 1]);
+    }
+    h->index--;
+
+    ed->modified = 1;
+    ed->buf.lsp_dirty = 1;
+}
+
+void editor_redo(EditorState *ed) {
+    UndoHistory *h = &ed->history;
+    if (h->index >= h->size) return;
+
+    UndoEntry *e = &h->entries[h->index];
+    for (size_t i = 0; i < e->count; i++) {
+        apply_delta_forward(ed, &e->deltas[i]);
+    }
+    h->index++;
+
+    ed->modified = 1;
+    ed->buf.lsp_dirty = 1;
 }
 
 void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
@@ -355,12 +704,26 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             size_t len = strlen(line);
             if (ed->cursor_col < len) {
                 // delete character at cursor
+                CursorPos before = { ed->cursor_line, ed->cursor_col };
+                CursorPos after = { ed->cursor_line, ed->cursor_col };
+                record_replace(ed,
+                               ed->cursor_line, ed->cursor_col,
+                               ed->cursor_line, ed->cursor_col + 1,
+                               "",
+                               before, after);
                 memmove(line + ed->cursor_col, line + ed->cursor_col + 1, len - ed->cursor_col);
                 ed->modified = 1;
                 buf->lsp_dirty = 1;
             } else if (ed->cursor_line + 1 < buf->count) {
                 // at end of line, join with next line
                 size_t nextlen = strlen(buf->lines[ed->cursor_line + 1]);
+                CursorPos before = { ed->cursor_line, len };
+                CursorPos after = { ed->cursor_line, len };
+                record_replace(ed,
+                               ed->cursor_line, len,
+                               ed->cursor_line + 1, nextlen,
+                               buf->lines[ed->cursor_line + 1],
+                               before, after);
                 line = realloc(line, len + nextlen + 1);
                 memcpy(line + len, buf->lines[ed->cursor_line + 1], nextlen + 1);
                 buf->lines[ed->cursor_line] = line;
@@ -381,6 +744,13 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             // delete previous character
             char *line = buf->lines[ed->cursor_line];
             size_t len = strlen(line);
+            CursorPos before = { ed->cursor_line, ed->cursor_col };
+            CursorPos after = { ed->cursor_line, ed->cursor_col - 1 };
+            record_replace(ed,
+                           ed->cursor_line, ed->cursor_col - 1,
+                           ed->cursor_line, ed->cursor_col,
+                           "",
+                           before, after);
             memmove(line + ed->cursor_col - 1, line + ed->cursor_col, len - ed->cursor_col + 1);
             ed->cursor_col--;
             ed->modified = 1;
@@ -389,6 +759,13 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             // join with previous line
             size_t prevlen = strlen(buf->lines[ed->cursor_line - 1]);
             size_t curlen = strlen(buf->lines[ed->cursor_line]);
+            CursorPos before = { ed->cursor_line, 0 };
+            CursorPos after = { ed->cursor_line - 1, prevlen };
+            record_replace(ed,
+                           ed->cursor_line - 1, prevlen,
+                           ed->cursor_line, curlen,
+                           buf->lines[ed->cursor_line],
+                           before, after);
             buf->lines[ed->cursor_line - 1] = realloc(buf->lines[ed->cursor_line - 1], prevlen + curlen + 1);
             memcpy(buf->lines[ed->cursor_line - 1] + prevlen, buf->lines[ed->cursor_line], curlen + 1);
             free(buf->lines[ed->cursor_line]);
@@ -408,6 +785,13 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             size_t indent_len = strlen(indent);
             char *line = buf->lines[ed->cursor_line];
             size_t len = strlen(line);
+            CursorPos before = { ed->cursor_line, ed->cursor_col };
+            CursorPos after = { ed->cursor_line, ed->cursor_col + indent_len };
+            record_replace(ed,
+                           ed->cursor_line, ed->cursor_col,
+                           ed->cursor_line, ed->cursor_col,
+                           indent,
+                           before, after);
             line = realloc(line, len + indent_len + 1);
             memmove(line + ed->cursor_col + indent_len, line + ed->cursor_col, len - ed->cursor_col + 1);
             memcpy(line + ed->cursor_col, indent, indent_len);
@@ -430,24 +814,18 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         {
             // split line at cursor with auto-indent
             char *line = buf->lines[ed->cursor_line];
+            size_t line_len = strlen(line);
             char *after_cursor = dupstr(line + ed->cursor_col);
             line[ed->cursor_col] = '\0';
-            
-            // Skip leading whitespace in after_cursor
             char *after_trimmed = after_cursor;
             while (*after_trimmed == ' ' || *after_trimmed == '\t') after_trimmed++;
             size_t trimmed_len = strlen(after_trimmed);
             
-            // Get the base indent of the current line
             char *base_indent = editor_get_line_indent(line);
             size_t base_indent_len = strlen(base_indent);
-            
-            // Calculate auto-indent for the new line (may be increased)
             char *auto_ind = editor_auto_indent(ed, line);
             size_t auto_ind_len = strlen(auto_ind);
-            
-            // Check for vim-style bracket handling: cursor between { and }
-            // If line ends with '{' and after_trimmed starts with '}'
+
             int between_braces = 0;
             if (trimmed_len > 0 && after_trimmed[0] == '}') {
                 // Check if line (before cursor) ends with '{'
@@ -460,19 +838,35 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             }
             
             if (between_braces) {
-                // Vim-style: create two lines
-                // Line 1: just the indented cursor line (empty with indent)
-                // Line 2: closing brace with base indent
-                
-                // First new line: just the auto-indent (cursor goes here)
                 char *newline1 = malloc(auto_ind_len + 1);
                 memcpy(newline1, auto_ind, auto_ind_len);
                 newline1[auto_ind_len] = '\0';
                 
-                // Second new line: base indent + the closing brace and rest
                 char *newline2 = malloc(base_indent_len + trimmed_len + 1);
                 memcpy(newline2, base_indent, base_indent_len);
                 memcpy(newline2 + base_indent_len, after_trimmed, trimmed_len + 1);
+
+                // Record replacement of tail of line with two new lines
+                size_t new_len = auto_ind_len + base_indent_len + trimmed_len + 2; // two '\n'
+                char *new_text = malloc(new_len + 1);
+                if (new_text) {
+                    size_t pos = 0;
+                    new_text[pos++] = '\n';
+                    memcpy(new_text + pos, newline1, auto_ind_len);
+                    pos += auto_ind_len;
+                    new_text[pos++] = '\n';
+                    memcpy(new_text + pos, newline2, base_indent_len + trimmed_len);
+                    pos += base_indent_len + trimmed_len;
+                    new_text[pos] = '\0';
+                    CursorPos before = { ed->cursor_line, ed->cursor_col };
+                    CursorPos afterpos = { ed->cursor_line + 1, auto_ind_len };
+                    record_replace(ed,
+                                   ed->cursor_line, ed->cursor_col,
+                                   ed->cursor_line, line_len,
+                                   new_text,
+                                   before, afterpos);
+                    free(new_text);
+                }
                 
                 free(after_cursor);
                 free(auto_ind);
@@ -488,6 +882,25 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                 char *newline = malloc(auto_ind_len + trimmed_len + 1);
                 memcpy(newline, auto_ind, auto_ind_len);
                 memcpy(newline + auto_ind_len, after_trimmed, trimmed_len + 1);
+
+                // Record replacement of tail of line with a single new line
+                size_t new_len = auto_ind_len + trimmed_len + 1; // one '\n'
+                char *new_text = malloc(new_len + 1);
+                if (new_text) {
+                    size_t pos = 0;
+                    new_text[pos++] = '\n';
+                    memcpy(new_text + pos, newline, auto_ind_len + trimmed_len);
+                    pos += auto_ind_len + trimmed_len;
+                    new_text[pos] = '\0';
+                    CursorPos before = { ed->cursor_line, ed->cursor_col };
+                    CursorPos afterpos = { ed->cursor_line + 1, auto_ind_len };
+                    record_replace(ed,
+                                   ed->cursor_line, ed->cursor_col,
+                                   ed->cursor_line, line_len,
+                                   new_text,
+                                   before, afterpos);
+                    free(new_text);
+                }
                 
                 free(after_cursor);
                 free(auto_ind);
@@ -512,6 +925,17 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         break;
     default:
         if (ch >= 32 && ch <= 126) {
+            // If typing a closing bracket and the same char is under the cursor,
+            // just move over it instead of inserting a duplicate.
+            if (ch == ')' || ch == ']' || ch == '}') {
+                char *line = buf->lines[ed->cursor_line];
+                size_t len = strlen(line);
+                if (ed->cursor_col < len && line[ed->cursor_col] == ch) {
+                    ed->cursor_col++;
+                    break;
+                }
+            }
+
             // Check for auto-closing brackets
             char closing = 0;
             switch (ch) {
@@ -553,6 +977,18 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
             
             if (closing) {
                 // Insert both opening and closing, cursor between them
+                char pair[3];
+                pair[0] = (char)ch;
+                pair[1] = closing;
+                pair[2] = '\0';
+                CursorPos before = { ed->cursor_line, ed->cursor_col };
+                CursorPos after = { ed->cursor_line, ed->cursor_col + 1 };
+                record_replace(ed,
+                               ed->cursor_line, ed->cursor_col,
+                               ed->cursor_line, ed->cursor_col,
+                               pair,
+                               before, after);
+
                 char *line = buf->lines[ed->cursor_line];
                 size_t len = strlen(line);
                 line = realloc(line, len + 3);  // +2 for both chars, +1 for null
@@ -565,6 +1001,17 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                 buf->lsp_dirty = 1;
             } else {
                 // Normal character insertion
+                char inserted[2];
+                inserted[0] = (char)ch;
+                inserted[1] = '\0';
+                CursorPos before = { ed->cursor_line, ed->cursor_col };
+                CursorPos after = { ed->cursor_line, ed->cursor_col + 1 };
+                record_replace(ed,
+                               ed->cursor_line, ed->cursor_col,
+                               ed->cursor_line, ed->cursor_col,
+                               inserted,
+                               before, after);
+
                 char *line = buf->lines[ed->cursor_line];
                 size_t len = strlen(line);
                 line = realloc(line, len + 2);
@@ -612,6 +1059,17 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
         }
         return;
     }
+
+    // Immediate undo/redo when command buffer is empty
+    if (ed->cmdlen == 0) {
+        if (ch == 'u') {
+            editor_undo(ed);
+            return;
+        } else if (ch == 'r') {
+            editor_redo(ed);
+            return;
+        }
+    }
     
     if (ch == 27) {
         // ESC in command mode -> back to insert (only if file is created)
@@ -624,7 +1082,6 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
     if (ch == '\n' || ch == '\r') {
         // execute command in cmdbuf
         if (ed->cmdlen > 0) {
-            // common commands: q, q!, w, wq, x
             if (ed->cmdbuf[0] == 'q' && ed->cmdbuf[1] == '\0') {
                 ed->quit = 1;
             } else if (strcmp(ed->cmdbuf, "q!") == 0) {
