@@ -14,7 +14,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <libssh/libssh.h>
+#include <libssh/sftp.h>
 #include <netinet/ip_icmp.h>
+#include <fcntl.h>
 #include "quickjs.h"
 
 #define PACKET_SIZE 64
@@ -59,6 +61,16 @@ static const char *tcp_state_name(unsigned int st) {
     }
 }
 
+// simple hex printer to avoid deprecated ssh_print_hexa
+static void ssh_print_hexa_local(const char *descr, const unsigned char *what, size_t len) {
+    size_t i;
+    fprintf(stderr, "%s: ", descr ? descr : "hex");
+    for (i = 0; i < len; i++) {
+        fprintf(stderr, "%02x", what[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 // ip formatter
 static void format_ip(char *dst, size_t size, unsigned int ip) {
     struct in_addr addr;
@@ -82,6 +94,20 @@ void ssh_param_free(struct ssh_param *params) {
     free(params->user);
     free(params->host);
     free(params);
+}
+
+// helper to build SSH session from params (used by ssh and scp)
+static ssh_session ssh_create_session_from_params(struct ssh_param *params) {
+    ssh_session sess = ssh_new();
+    if (!sess) {
+        return NULL;
+    }
+
+    if (params->host) ssh_options_set(sess, SSH_OPTIONS_HOST, params->host);
+    if (params->user) ssh_options_set(sess, SSH_OPTIONS_USER, params->user);
+    if (params->port) ssh_options_set(sess, SSH_OPTIONS_PORT, &params->port);
+
+    return sess;
 }
 
 // parse ssh params
@@ -238,14 +264,18 @@ int interactive_shell(ssh_session session) {
         if (FD_ISSET(ssh_get_fd(session), &fds)) {
             if (ssh_channel_is_eof(channel) || ssh_channel_is_closed(channel)) {
                 // Drain remaining output before exit
-                while ((nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0)) > 0)
-                    write(STDOUT_FILENO, buffer, nbytes);
+                while ((nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0)) > 0) {
+                    ssize_t w = write(STDOUT_FILENO, buffer, nbytes);
+                    (void)w;
+                }
                 break;
             }
 
             nbytes = ssh_channel_read_nonblocking(channel, buffer, sizeof(buffer), 0);
-            if (nbytes > 0)
-                write(STDOUT_FILENO, buffer, nbytes);
+            if (nbytes > 0) {
+                ssize_t w = write(STDOUT_FILENO, buffer, nbytes);
+                (void)w;
+            }
         }
     }
 
@@ -301,7 +331,7 @@ int verify_knownhost(ssh_session session)
             break;
         case SSH_KNOWN_HOSTS_CHANGED:
             fprintf(stderr, "Host key for server changed: it is now:\n");
-            ssh_print_hexa("Public key hash", hash, hlen);
+            ssh_print_hexa_local("Public key hash", hash, hlen);
             fprintf(stderr, "For security reasons, connection will be stopped\n");
             ssh_clean_pubkey_hash(&hash);
  
@@ -921,62 +951,347 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JS_FreeCString(ctx, input_str);
 
     if (!params) {
-        ssh_param_free(params);
         return JS_ThrowTypeError(ctx, "Invalid SSH connection string format");
     }
-    
+
+    const char *disp_user = params->user ? params->user : getenv("USER");
+    if (!disp_user) {
+        disp_user = "user";
+    }
+    const char *disp_host = params->host ? params->host : "(unknown)";
+
     printf("Connecting to: %s@%s:%d\n", 
-         params->user ? params->user : "(none)",
-         params->host ? params->host : "(none)",
-         params->port
-        );
+           disp_user,
+           disp_host,
+           params->port);
     
     int rc;
     char *password;
 
-    ssh_session ssh_sesh = ssh_new();
+    ssh_session ssh_sesh = ssh_create_session_from_params(params);
     if (!ssh_sesh){
         ssh_param_free(params);
         return JS_ThrowInternalError(ctx, "SSH session could not be created");
     }
-    
-    if (params->host) ssh_options_set(ssh_sesh, SSH_OPTIONS_HOST, params->host);
-    if (params->user) ssh_options_set(ssh_sesh, SSH_OPTIONS_USER, params->user);
-    if (params->port) ssh_options_set(ssh_sesh, SSH_OPTIONS_PORT, &params->port);
-    // ssh_options_set(ssh_sesh, SSH_OPTIONS_LOG_VERBOSITY, &params->verbosity);
 
     rc = ssh_connect(ssh_sesh);
     if (rc != SSH_OK){
+        const char *err = ssh_get_error(ssh_sesh);
+        JSValue ex = JS_ThrowInternalError(ctx,
+                                           "Error connecting to %s:%d: %s",
+                                           disp_host,
+                                           params->port,
+                                           err ? err : "unknown error");
         ssh_free(ssh_sesh);
         ssh_param_free(params);
-        return JS_ThrowInternalError(ctx, "Error connecting to %s: %s\n",
-            input_str,
-            ssh_get_error(ssh_sesh)
-        );
+        return ex;
     }
 
     if (verify_knownhost(ssh_sesh) < 0){
         ssh_disconnect(ssh_sesh);
-        ssh_free(ssh_sesh);    
+        ssh_free(ssh_sesh);
         ssh_param_free(params);
         return JS_UNDEFINED;
     }
 
-    printf("%s@%s's password: ", params->user, params->host);
+    printf("%s@%s's password: ", disp_user, disp_host);
     password = getpass("");
     rc = ssh_userauth_password(ssh_sesh, NULL, password);
     if (rc != SSH_AUTH_SUCCESS){
+        const char *err = ssh_get_error(ssh_sesh);
+        JSValue ex = JS_ThrowInternalError(ctx,
+                                           "Error authenticating with password: %s",
+                                           err ? err : "authentication failed");
         ssh_disconnect(ssh_sesh);
-        ssh_free(ssh_sesh);    
+        ssh_free(ssh_sesh);
         ssh_param_free(params);
-        return JS_ThrowInternalError(ctx, "Error authenticating with password: %s\n", ssh_get_error(ssh_sesh));
+        return ex;
     }
 
     interactive_shell(ssh_sesh);
 
     ssh_disconnect(ssh_sesh);
-    ssh_free(ssh_sesh);    
-    ssh_finalize();
+    ssh_free(ssh_sesh);
     ssh_param_free(params);
+    return JS_UNDEFINED;
+}
+
+// net.scp()
+// Usage:
+//   net.scp("user@host:22", "local_path", "remote_dir", "up")    // upload local_path to remote_dir/basename(local_path)
+//   net.scp("user@host:22", "local_path", "remote_path", "down") // download remote_path into local_path
+JSValue js_scp(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 4 || !JS_IsString(argv[0]) || !JS_IsString(argv[1]) ||
+        !JS_IsString(argv[2]) || !JS_IsString(argv[3])) {
+        return JS_ThrowTypeError(ctx,
+                                 "Expected: scp(conn, local_path, remote_path, direction) where direction is 'up' or 'down'");
+    }
+
+    const char *conn_str = JS_ToCString(ctx, argv[0]);
+    const char *local_path = JS_ToCString(ctx, argv[1]);
+    const char *remote_path = JS_ToCString(ctx, argv[2]);
+    const char *direction = JS_ToCString(ctx, argv[3]);
+
+    if (!conn_str || !local_path || !remote_path || !direction) {
+        if (conn_str) JS_FreeCString(ctx, conn_str);
+        if (local_path) JS_FreeCString(ctx, local_path);
+        if (remote_path) JS_FreeCString(ctx, remote_path);
+        if (direction) JS_FreeCString(ctx, direction);
+        return JS_EXCEPTION;
+    }
+
+    int upload = (strcmp(direction, "up") == 0 || strcmp(direction, "upload") == 0);
+    int download = (strcmp(direction, "down") == 0 || strcmp(direction, "download") == 0);
+
+    if (!upload && !download) {
+        JS_FreeCString(ctx, conn_str);
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return JS_ThrowTypeError(ctx, "direction must be 'up'|'upload' or 'down'|'download'");
+    }
+
+    struct ssh_param *params = ssh_param_parse(conn_str);
+    JS_FreeCString(ctx, conn_str);
+    if (!params) {
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return JS_ThrowTypeError(ctx, "Invalid SSH connection string format");
+    }
+
+    const char *disp_user = params->user ? params->user : getenv("USER");
+    if (!disp_user) disp_user = "user";
+    const char *disp_host = params->host ? params->host : "(unknown)";
+
+    ssh_session sess = ssh_create_session_from_params(params);
+    if (!sess) {
+        ssh_param_free(params);
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return JS_ThrowInternalError(ctx, "SSH session could not be created");
+    }
+
+    int rc = ssh_connect(sess);
+    if (rc != SSH_OK) {
+        const char *err = ssh_get_error(sess);
+        JSValue ex = JS_ThrowInternalError(ctx,
+                                           "Error connecting to %s:%d: %s",
+                                           disp_host,
+                                           params->port,
+                                           err ? err : "unknown error");
+        ssh_free(sess);
+        ssh_param_free(params);
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return ex;
+    }
+
+    if (verify_knownhost(sess) < 0) {
+        ssh_disconnect(sess);
+        ssh_free(sess);
+        ssh_param_free(params);
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return JS_UNDEFINED;
+    }
+
+    printf("%s@%s's password: ", disp_user, disp_host);
+    char *password = getpass("");
+    rc = ssh_userauth_password(sess, NULL, password);
+    if (rc != SSH_AUTH_SUCCESS) {
+        const char *err = ssh_get_error(sess);
+        JSValue ex = JS_ThrowInternalError(ctx,
+                                           "Error authenticating with password: %s",
+                                           err ? err : "authentication failed");
+        ssh_disconnect(sess);
+        ssh_free(sess);
+        ssh_param_free(params);
+        JS_FreeCString(ctx, local_path);
+        JS_FreeCString(ctx, remote_path);
+        JS_FreeCString(ctx, direction);
+        return ex;
+    }
+
+    JS_FreeCString(ctx, direction); // no longer needed
+
+    if (upload) {
+        // open local file for reading
+        FILE *fp = fopen(local_path, "rb");
+        if (!fp) {
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Cannot open local file for reading");
+        }
+
+        sftp_session sftp = sftp_new(sess);
+        if (!sftp) {
+            fclose(fp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to create SFTP session");
+        }
+
+        rc = sftp_init(sftp);
+        if (rc != SSH_OK) {
+            const char *err = ssh_get_error(sess);
+            sftp_free(sftp);
+            fclose(fp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to initialize SFTP: %s", err ? err : "unknown error");
+        }
+
+        // Build remote file path as remote_dir + '/' + basename(local_path)
+        const char *slash = strrchr(local_path, '/');
+        const char *base = slash ? slash + 1 : local_path;
+        size_t rlen = strlen(remote_path);
+        size_t blen = strlen(base);
+        size_t full_len = rlen + 1 + blen + 1;
+        char *remote_file = malloc(full_len);
+        if (!remote_file) {
+            sftp_free(sftp);
+            fclose(fp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowOutOfMemory(ctx);
+        }
+
+        if (rlen > 0 && remote_path[rlen - 1] == '/') {
+            snprintf(remote_file, full_len, "%s%s", remote_path, base);
+        } else {
+            snprintf(remote_file, full_len, "%s/%s", remote_path, base);
+        }
+
+        sftp_file sf = sftp_open(sftp, remote_file,
+                                 O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (!sf) {
+            free(remote_file);
+            sftp_free(sftp);
+            fclose(fp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to open remote file for writing via SFTP");
+        }
+
+        char buf[4096];
+        size_t nread;
+        while ((nread = fread(buf, 1, sizeof(buf), fp)) > 0) {
+            ssize_t w = sftp_write(sf, buf, nread);
+            if (w < 0) {
+                const char *err = ssh_get_error(sess);
+                sftp_close(sf);
+                free(remote_file);
+                sftp_free(sftp);
+                fclose(fp);
+                ssh_disconnect(sess);
+                ssh_free(sess);
+                ssh_param_free(params);
+                JS_FreeCString(ctx, local_path);
+                JS_FreeCString(ctx, remote_path);
+                return JS_ThrowInternalError(ctx, "Error writing data via SFTP: %s", err ? err : "unknown error");
+            }
+        }
+
+        sftp_close(sf);
+        free(remote_file);
+        sftp_free(sftp);
+        fclose(fp);
+    } else if (download) {
+        sftp_session sftp = sftp_new(sess);
+        if (!sftp) {
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to create SFTP session");
+        }
+
+        rc = sftp_init(sftp);
+        if (rc != SSH_OK) {
+            const char *err = ssh_get_error(sess);
+            sftp_free(sftp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to initialize SFTP: %s", err ? err : "unknown error");
+        }
+
+        sftp_file sf = sftp_open(sftp, remote_path, O_RDONLY, 0);
+        if (!sf) {
+            sftp_free(sftp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Failed to open remote file for reading via SFTP");
+        }
+
+        FILE *fp = fopen(local_path, "wb");
+        if (!fp) {
+            sftp_close(sf);
+            sftp_free(sftp);
+            ssh_disconnect(sess);
+            ssh_free(sess);
+            ssh_param_free(params);
+            JS_FreeCString(ctx, local_path);
+            JS_FreeCString(ctx, remote_path);
+            return JS_ThrowInternalError(ctx, "Cannot open local file for writing");
+        }
+
+        char buf[4096];
+        for (;;) {
+            ssize_t r = sftp_read(sf, buf, sizeof(buf));
+            if (r < 0) {
+                const char *err = ssh_get_error(sess);
+                fclose(fp);
+                sftp_close(sf);
+                sftp_free(sftp);
+                ssh_disconnect(sess);
+                ssh_free(sess);
+                ssh_param_free(params);
+                JS_FreeCString(ctx, local_path);
+                JS_FreeCString(ctx, remote_path);
+                return JS_ThrowInternalError(ctx, "Error reading data via SFTP: %s", err ? err : "unknown error");
+            }
+            if (r == 0) {
+                break; // EOF
+            }
+            fwrite(buf, 1, r, fp);
+        }
+
+        fclose(fp);
+        sftp_close(sf);
+        sftp_free(sftp);
+    }
+
+    ssh_disconnect(sess);
+    ssh_free(sess);
+    ssh_param_free(params);
+    JS_FreeCString(ctx, local_path);
+    JS_FreeCString(ctx, remote_path);
+
     return JS_UNDEFINED;
 }
