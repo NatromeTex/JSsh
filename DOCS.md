@@ -18,236 +18,6 @@ sys.sudo()
 ## `clear()`
 
 * **Description**: Clears the screen.
-# Git Utils commands
-
-This section details the commands present in the Git package available by installing the **git** module. All code in this package is written in **native C** using libgit2 and does not depend on external shells to run the code in the JSsh REPL.
-
----
-## `git.init("path")`
-
-* **Description**: Initializes a new Git repository at the specified path.
-* **Parameters**:
-
-  * `path` (string): Directory path where the repository will be created. If it does not exist, it will be created.
-* **Example**:
-
-```js
-git.init("myproject")
-// Initializes a Git repository in ./myproject
-```
-
----
-## `git.clone("repo_url", "path")`
-
-* **Description**: Clones a remote Git repository into a local directory.
-* **Parameters**:
-
-  * `repo_url` (string): URL of the remote repository.
-  * `path` (string, optional): Target directory. Defaults to the repo name if omitted.
-* **Example**:
-
-```js
-git.clone("https://github.com/user/repo.git", "./repo")
-```
-
----
-## `git.config(key[, value])`
-
-* **Description**: Gets or sets a local Git configuration value for the repository at the current working directory.
-* **Parameters**:
-
-  * `key` (string): Config key, e.g. `"user.name"` or `"user.email"`.
-  * `value` (string, optional): When provided, sets the config value; when omitted, returns the current value.
-* **Examples**:
-
-```js
-git.config("user.name")
-// "Your Name"
-
-git.config("user.email", "me@example.com")
-```
-
----
-## `git.add(path)`
-
-* **Description**: Stages changes for commit.
-* **Parameters**:
-
-  * `path` (string): File or directory path to stage. Use `"."` to stage all tracked and untracked files.
-* **Examples**:
-
-```js
-git.add("file.txt")
-git.add(".")
-```
-
----
-## `git.status()`
-
-* **Description**: Displays a short status of the working tree, similar to `git status -s`.
-* **Parameters**: None
-* **Example**:
-
-```js
-git.status()
-// M  src/main.c
-// ?? newfile.txt
-```
-
----
-## `git.commit(message)`
-
-* **Description**: Creates a commit from the current index on the current branch.
-* **Parameters**:
-
-  * `message` (string): Commit message.
-* **Behavior**:
-
-  * Uses `user.name` and `user.email` from Git config if available, otherwise falls back to a default identity.
-* **Example**:
-
-```js
-git.commit("Initial commit")
-```
-
----
-## `git.diff()`
-
-* **Description**: Shows a patch-style diff between `HEAD`, index and working tree, similar to `git diff`.
-* **Parameters**: None
-* **Example**:
-
-```js
-git.diff()
-```
-
----
-## `git.branch()` / `git.branch(name)`
-
-* **Description**:
-
-  * `git.branch()` lists all local branches.
-  * `git.branch(name)` creates a new branch at `HEAD` with the given name.
-* **Parameters**:
-
-  * `name` (string, optional): Name of the branch to create.
-* **Examples**:
-
-```js
-git.branch()
-// main
-// feature-x
-
-git.branch("feature-y")
-```
-
----
-## `git.checkout(name)`
-
-* **Description**: Checks out an existing local branch.
-* **Parameters**:
-
-  * `name` (string): Name of the branch to switch to.
-* **Example**:
-
-```js
-git.checkout("main")
-```
-
----
-## `git.merge(name)`
-
-* **Description**: Merges the specified local branch into the current `HEAD`.
-* **Parameters**:
-
-  * `name` (string): Name of the branch to merge into the current branch.
-* **Behavior**:
-
-  * Performs a simple libgit2 merge; conflicts and errors are surfaced in the REPL.
-* **Example**:
-
-```js
-git.merge("feature-x")
-```
-
----
-## `git.pull([remote])`
-
-* **Description**: Performs a `fetch` from the given remote and merges the corresponding remote branch into the current branch.
-* **Parameters**:
-
-  * `remote` (string, optional, default `"origin"`): Remote name.
-* **Examples**:
-
-```js
-git.pull()
-git.pull("origin")
-```
-
----
-## `git.fetch([remote])`
-
-* **Description**: Fetches updates from the given remote without merging, updating the remote-tracking branches.
-* **Parameters**:
-
-  * `remote` (string, optional, default `"origin"`): Remote name.
-* **Example**:
-
-```js
-git.fetch()
-```
-
----
-## `git.push([remote])`
-
-* **Description**: Pushes the current branch to the given remote.
-* **Parameters**:
-
-  * `remote` (string, optional, default `"origin"`): Remote name.
-* **Behavior**:
-
-  * Uses the SSH agent for SSH URLs when available, or libgit2's default credential helpers.
-* **Example**:
-
-```js
-git.push()
-```
-
----
-## `git.log([n])`
-
-* **Description**: Displays the last `n` commits on the current branch.
-* **Parameters**:
-
-  * `n` (number, optional, default `10`): Number of commits to show.
-* **Example**:
-
-```js
-git.log()
-// abc1234 Your Name <you@example.com> Initial commit
-// def5678 Your Name <you@example.com> Add feature X
-```
-
----
-## `git.stash([message])`
-
-* **Description**: Saves the current working tree and index to a new stash entry.
-* **Parameters**:
-
-  * `message` (string, optional): Description for the stash entry.
-* **Behavior**:
-
-  * Prints a note when there are no local changes to stash.
-* **Examples**:
-
-```js
-git.stash()
-git.stash("WIP: refactor")
-```
-
-<br>
-
-# Applications
 * **Example**:
 
 ```js
@@ -889,6 +659,234 @@ fs.find("./lib", { name: "*.c", type: "f", depth: 2})
 ```
 
 <br>
+
+# Git Utils commands
+
+This section details the commands present in the Git package available by installing the **git** module. All code in this package is written in **native C** using libgit2 and does not depend on external shells to run the code in the JSsh REPL.
+
+---
+## `git.init("path")`
+
+* **Description**: Initializes a new Git repository at the specified path.
+* **Parameters**:
+
+  * `path` (string): Directory path where the repository will be created. If it does not exist, it will be created.
+* **Example**:
+
+```js
+git.init("myproject")
+// Initializes a Git repository in ./myproject
+```
+
+---
+## `git.clone("repo_url", "path")`
+
+* **Description**: Clones a remote Git repository into a local directory.
+* **Parameters**:
+
+  * `repo_url` (string): URL of the remote repository.
+  * `path` (string, optional): Target directory. Defaults to the repo name if omitted.
+* **Example**:
+
+```js
+git.clone("https://github.com/user/repo.git", "./repo")
+```
+
+---
+## `git.config(key[, value])`
+
+* **Description**: Gets or sets a local Git configuration value for the repository at the current working directory.
+* **Parameters**:
+
+  * `key` (string): Config key, e.g. `"user.name"` or `"user.email"`.
+  * `value` (string, optional): When provided, sets the config value; when omitted, returns the current value.
+* **Examples**:
+
+```js
+git.config("user.name")
+// "Your Name"
+
+git.config("user.email", "me@example.com")
+```
+
+---
+## `git.add(path)`
+
+* **Description**: Stages changes for commit.
+* **Parameters**:
+
+  * `path` (string): File or directory path to stage. Use `"."` to stage all tracked and untracked files.
+* **Examples**:
+
+```js
+git.add("file.txt")
+git.add(".")
+```
+
+---
+## `git.status()`
+
+* **Description**: Displays a short status of the working tree, similar to `git status -s`.
+* **Parameters**: None
+* **Example**:
+
+```js
+git.status()
+// M  src/main.c
+// ?? newfile.txt
+```
+
+---
+## `git.commit(message)`
+
+* **Description**: Creates a commit from the current index on the current branch.
+* **Parameters**:
+
+  * `message` (string): Commit message.
+* **Behavior**:
+
+  * Uses `user.name` and `user.email` from Git config if available, otherwise falls back to a default identity.
+* **Example**:
+
+```js
+git.commit("Initial commit")
+```
+
+---
+## `git.diff()`
+
+* **Description**: Shows a patch-style diff between `HEAD`, index and working tree, similar to `git diff`.
+* **Parameters**: None
+* **Example**:
+
+```js
+git.diff()
+```
+
+---
+## `git.branch()` / `git.branch(name)`
+
+* **Description**:
+
+  * `git.branch()` lists all local branches.
+  * `git.branch(name)` creates a new branch at `HEAD` with the given name.
+* **Parameters**:
+
+  * `name` (string, optional): Name of the branch to create.
+* **Examples**:
+
+```js
+git.branch()
+// main
+// feature-x
+
+git.branch("feature-y")
+```
+
+---
+## `git.checkout(name)`
+
+* **Description**: Checks out an existing local branch.
+* **Parameters**:
+
+  * `name` (string): Name of the branch to switch to.
+* **Example**:
+
+```js
+git.checkout("main")
+```
+
+---
+## `git.merge(name)`
+
+* **Description**: Merges the specified local branch into the current `HEAD`.
+* **Parameters**:
+
+  * `name` (string): Name of the branch to merge into the current branch.
+* **Behavior**:
+
+  * Performs a simple libgit2 merge; conflicts and errors are surfaced in the REPL.
+* **Example**:
+
+```js
+git.merge("feature-x")
+```
+
+---
+## `git.pull([remote])`
+
+* **Description**: Performs a `fetch` from the given remote and merges the corresponding remote branch into the current branch.
+* **Parameters**:
+
+  * `remote` (string, optional, default `"origin"`): Remote name.
+* **Examples**:
+
+```js
+git.pull()
+git.pull("origin")
+```
+
+---
+## `git.fetch([remote])`
+
+* **Description**: Fetches updates from the given remote without merging, updating the remote-tracking branches.
+* **Parameters**:
+
+  * `remote` (string, optional, default `"origin"`): Remote name.
+* **Example**:
+
+```js
+git.fetch()
+```
+
+---
+## `git.push([remote])`
+
+* **Description**: Pushes the current branch to the given remote.
+* **Parameters**:
+
+  * `remote` (string, optional, default `"origin"`): Remote name.
+* **Behavior**:
+
+  * Uses the SSH agent for SSH URLs when available, or libgit2's default credential helpers.
+* **Example**:
+
+```js
+git.push()
+```
+
+---
+## `git.log([n])`
+
+* **Description**: Displays the last `n` commits on the current branch.
+* **Parameters**:
+
+  * `n` (number, optional, default `10`): Number of commits to show.
+* **Example**:
+
+```js
+git.log()
+// abc1234 Your Name <you@example.com> Initial commit
+// def5678 Your Name <you@example.com> Add feature X
+```
+
+---
+## `git.stash([message])`
+
+* **Description**: Saves the current working tree and index to a new stash entry.
+* **Parameters**:
+
+  * `message` (string, optional): Description for the stash entry.
+* **Behavior**:
+
+  * Prints a note when there are no local changes to stash.
+* **Examples**:
+
+```js
+git.stash()
+git.stash("WIP: refactor")
+```
+
 
 # Applications
 
