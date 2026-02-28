@@ -31,7 +31,6 @@
 #define JSVIM_CONFIG_FILE ".jsvimrc"
 
 // Open or create the config file at ~/.jsvimrc
-// Returns: 0 on success, -1 on failure
 static int init_config_file(void) {
     const char *home = getenv("HOME");
     if (!home) {
@@ -41,14 +40,11 @@ static int init_config_file(void) {
     char config_path[1024];
     snprintf(config_path, sizeof(config_path), "%s/%s", home, JSVIM_CONFIG_FILE);
 
-    // Check if file exists
     struct stat st;
     if (stat(config_path, &st) == 0) {
-        // File exists, nothing to do for now
         return 0;
     }
 
-    // File doesn't exist, create it with default settings
     FILE *fp = fopen(config_path, "w");
     if (!fp) {
         return -1;
@@ -79,6 +75,14 @@ static int init_config_file(void) {
     return 0;
 }
 
+/* So two and a half years after I first used vi I still prefered VSCode for my code editing, funnily JSVIM and JSsh are both
+*  developed fully in VSCode. While developing a rather eccentric app for a government entity running RHEL 6.9 (nice) and python2
+*  both of which, were obsolete in 2013. Not released, obsolete, still being used in 2025 (They changed to a newer linux now) I  
+*  discovered the ncurses library, it was like the pieces I needed for my stupid idea literally walked upto me offered itself to my 
+*  disposal. I made a very crude attempt at making a better vi or vim with chatGPT at that time, but it was a hilarious failure. 4 months 
+*  later and over the course of maybe 2-3 weeks, that dream will finally be seen through...
+*/
+
 int main(int argc, char **argv) {
     EditorState ed;
     editor_init(&ed);
@@ -98,7 +102,6 @@ int main(int argc, char **argv) {
             ed.have_filename = 1;
             ed.existing_file = !load_file(&ed.buf, ed.filename);
             if (!ed.existing_file) {
-                // file didn't exist; start with empty buffer, prompt user
                 buf_push(&ed.buf, dupstr(""));
                 ed.file_created = 0;
                 ed.mode_insert = 0;  // Stay in command mode until file is created
@@ -140,7 +143,6 @@ int main(int argc, char **argv) {
             ed.have_filename = 1;
             ed.existing_file = !load_file(&ed.buf, ed.filename);
             if (!ed.existing_file) {
-                // file didn't exist; start with empty buffer, prompt user
                 buf_free(&ed.buf);
                 buf_init(&ed.buf);
                 buf_push(&ed.buf, dupstr(""));
@@ -154,54 +156,45 @@ int main(int argc, char **argv) {
     }
     
     ed.buf.ft = detect_filetype(ed.filename);
-    // Remember the path for LSP URI construction
     strncpy(ed.buf.filepath, ed.filename, sizeof(ed.buf.filepath) - 1);
     ed.buf.filepath[sizeof(ed.buf.filepath) - 1] = '\0';
 
-    // Always do regex highlighting first (basic syntax highlighting)
     highlight_buffer(&ed.buf);
 
-    // Then try to start LSP for deep semantic highlighting (layered on top)
     if (ed.buf.ft != FT_NONE) {
         ed.buf.lsp = spawn_lsp(&ed.buf.ft);
         if (ed.buf.lsp.pid > 0) {
             lsp_initialize(&ed.buf);
         } else {
-            // failed to start LSP
+            fprintf(stderr, "Warning: Failed to start LSP for filetype %d\n", ed.buf.ft);
         }
     }
 
-    // Create two windows: main window and command window
     WINDOW *main_win = NULL;
     WINDOW *cmd_win = NULL;
     const char *title = "JSVIM";
     int ch;
 
     while (!ed.quit) {
-        // Process LSP messages first to get diagnostics before rendering
         editor_process_lsp(&ed);
         
         getmaxyx(stdscr, maxy, maxx);
         
-        // Delete old windows if they exist
         if (main_win) delwin(main_win);
         if (cmd_win) delwin(cmd_win);
         
-        // Create main window (everything except last row)
         main_win = newwin(maxy - 1, maxx, 0, 0);
         keypad(main_win, TRUE);
-        wtimeout(main_win, 200);  // Set timeout for LSP message processing
+        wtimeout(main_win, 200);
         
-        // Create command window (last row only)
         cmd_win = newwin(1, maxx, maxy - 1, 0);
         keypad(cmd_win, TRUE);
-        wtimeout(cmd_win, 200);  // Set timeout for LSP message processing
+        wtimeout(cmd_win, 200);
 
         int gutter_width = compute_gutter_width(ed.buf.count);
         int col_offset = gutter_width + 2;
         int visible_rows = maxy - 3;
 
-        // Compute cursor position
         int cy, cx;
         compute_cursor_position(&ed.buf, ed.cursor_line, ed.cursor_col,
                                col_offset, maxx, visible_rows,
@@ -247,7 +240,7 @@ int main(int argc, char **argv) {
             editor_handle_command_mode(&ed, ch, cmd_win, maxx);
         }
 
-            // Autosave: save after 2 seconds of inactivity since last input
+            // Autosave
             if (ed.autosave_enabled && ed.modified && ed.have_filename && ed.file_created) {
                 if (ed.last_input_time != 0) {
                     time_t now2 = time(NULL);
