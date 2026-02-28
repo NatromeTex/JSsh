@@ -15,19 +15,37 @@
 
 #define JS_SUPPRESS "\x1B[JSSH_SUPPRESS"
 
-// Cleanup for WSL
-#ifdef _WIN32
-#include <windows.h>
-
-static void normalize_win_mount(char *dst, const char *src) {
-    if (!GetVolumePathNameA(src, dst, 256)) {
-        // fallback: keep original
-        strncpy(dst, src, 255);
-        dst[255] = 0;
+// Detect if running under WSL
+static int is_wsl(void) {
+    static int cached = -1;
+    if (cached >= 0) return cached;
+    FILE *fp = fopen("/proc/version", "r");
+    if (!fp) { cached = 0; return 0; }
+    char buf[512];
+    cached = 0;
+    if (fgets(buf, sizeof(buf), fp)) {
+        if (strstr(buf, "Microsoft") || strstr(buf, "microsoft") || strstr(buf, "WSL"))
+            cached = 1;
     }
+    fclose(fp);
+    return cached;
 }
 
-#endif
+// Decode octal escape sequences in /proc/mounts entries
+// e.g. "C:\\134" (representing C:\) => "C:\\"
+static void decode_mount_escapes(char *dst, const char *src, size_t dstlen) {
+    size_t di = 0;
+    for (const char *s = src; *s && di < dstlen - 1; ) {
+        if (*s == '\\' && s[1] >= '0' && s[1] <= '7' &&
+            s[2] >= '0' && s[2] <= '7' && s[3] >= '0' && s[3] <= '7') {
+            dst[di++] = (char)((s[1] - '0') * 64 + (s[2] - '0') * 8 + (s[3] - '0'));
+            s += 4;
+        } else {
+            dst[di++] = *s++;
+        }
+    }
+    dst[di] = '\0';
+}
 
 // Print tree symbols
 static void print_indent(int depth, int is_last) {
@@ -212,7 +230,9 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     static const char *skip_fs[] = {
         "proc", "sysfs", "tmpfs", "devtmpfs", "cgroup", "cgroup2",
         "debugfs", "tracefs", "mqueue", "autofs", "overlay",
-        "squashfs", "ramfs", NULL
+        "squashfs", "ramfs", "rootfs", "devpts", "binfmt_misc",
+        "hugetlbfs", "fusectl", "configfs", "securityfs", "pstore",
+        NULL
     };
 
     int i;
@@ -237,15 +257,24 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         return 0;
     }
 
-#ifdef _WIN32
-    //Windows path normalization 
-    void normalize_win_mount(char *dst, const char *src) {
-        if (!GetVolumePathNameA(src, dst, 256)) {
-            strncpy(dst, src, 255);
-            dst[255] = 0;
+    // Track already-seen device names for dedup (by underlying device)
+    char seen_devs[256][256];
+    int seen_dev_count = 0;
+
+    int seen_device(const char *dev) {
+        int k;
+        for (k = 0; k < seen_dev_count; k++)
+            if (strcmp(dev, seen_devs[k]) == 0)
+                return 1;
+        if (seen_dev_count < 256) {
+            strncpy(seen_devs[seen_dev_count], dev, 255);
+            seen_devs[seen_dev_count][255] = 0;
+            seen_dev_count++;
         }
+        return 0;
     }
-#endif
+
+    int wsl = is_wsl();
 
     while (fscanf(fp, "%255s %255s %63s %255s %d %d",
                   fs, mountpoint, type, opts, &dump, &pass) == 6) {
@@ -254,19 +283,33 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         if (is_pseudo_fs(type))
             continue;
 
-#ifdef _WIN32
-        //Normalize synthetic Windows mounts 
-        char norm[256];
-        normalize_win_mount(norm, mountpoint);
-        strcpy(mountpoint, norm);
-#endif
+        // Decode octal escapes from /proc/mounts (e.g. C:\134 -> C:\)
+        char decoded_fs[256], decoded_mp[256];
+        decode_mount_escapes(decoded_fs, fs, sizeof(decoded_fs));
+        decode_mount_escapes(decoded_mp, mountpoint, sizeof(decoded_mp));
 
-        //Deduplicate 
-        if (seen_mount(mountpoint))
+        if (wsl) {
+            // Skip WSL-internal mounts
+            if (strncmp(decoded_mp, "/mnt/wslg", 9) == 0)
+                continue;
+            if (strcmp(decoded_mp, "/init") == 0)
+                continue;
+            // Skip WSL driver/lib pseudo mounts (9p type but not Windows drives)
+            if (strcmp(type, "9p") == 0 &&
+                strncmp(decoded_mp, "/mnt/", 5) != 0)
+                continue;
+        }
+
+        // Deduplicate by mountpoint
+        if (seen_mount(decoded_mp))
+            continue;
+
+        // Deduplicate by device name (e.g. same /dev/sdd at / and /mnt/wslg/distro)
+        if (seen_device(decoded_fs))
             continue;
 
         struct statvfs buf;
-        if (statvfs(mountpoint, &buf) != 0)
+        if (statvfs(decoded_mp, &buf) != 0)
             continue;
 
         unsigned long bs = buf.f_frsize ? buf.f_frsize : buf.f_bsize;
@@ -283,12 +326,12 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         double pct = total > 0 ? (used / total) * 100.0 : 0.0;
 
         printf("%-18s  %6.1f %s  %6.1f %s  %6.1f %s  %5.1f%%  %s\n",
-               fs,
+               decoded_fs,
                htotal, utotal,
                hused,  uused,
                havail, uavail,
                pct,
-               mountpoint);
+               decoded_mp);
     }
 
     fclose(fp);
