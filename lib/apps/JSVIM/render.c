@@ -139,20 +139,20 @@ void render_init_colors(void) {
     init_pair(COLOR_PAIR_WARNING, 226, -1);             // warnings
 
     // Semantic token colors (foreground only, background stays default)
-    init_pair(SY_KEYWORD,   get_semantic_color("keyword",   COLOR_BLUE),    -1);
-    init_pair(SY_TYPE,      get_semantic_color("type",      COLOR_CYAN),    -1);
-    init_pair(SY_FUNCTION,  get_semantic_color("function",  COLOR_YELLOW),  -1);
-    init_pair(SY_STRING,    get_semantic_color("string",    127),           -1);
-    init_pair(SY_NUMBER,    get_semantic_color("number",    14),            -1);
-    init_pair(SY_COMMENT,   get_semantic_color("comment",   34),            -1);
-    init_pair(SY_OPERATOR,  get_semantic_color("operator",  COLOR_WHITE),   -1);
-    init_pair(SY_MACRO,     get_semantic_color("macro",     COLOR_MAGENTA), -1);
-    init_pair(SY_CLASS,     get_semantic_color("class",     COLOR_GREEN),   -1);
-    init_pair(SY_ENUM,      get_semantic_color("enum",      COLOR_GREEN),   -1);
-    init_pair(SY_NAMESPACE, get_semantic_color("namespace", 66),            -1);
-    init_pair(SY_VARIABLE,  get_semantic_color("variable",  COLOR_WHITE),   -1);
-    init_pair(SY_PARAMETER, get_semantic_color("parameter", 180),           -1);
-    init_pair(SY_PROPERTY,  get_semantic_color("property",  110),           -1);
+    init_pair(SY_KEYWORD,   get_semantic_color("keyword",   147), -1);
+    init_pair(SY_TYPE,      get_semantic_color("type",      45),  -1);
+    init_pair(SY_FUNCTION,  get_semantic_color("function",  186), -1);
+    init_pair(SY_STRING,    get_semantic_color("string",    217), -1);
+    init_pair(SY_NUMBER,    get_semantic_color("number",    150), -1);
+    init_pair(SY_COMMENT,   get_semantic_color("comment",   244), -1);
+    init_pair(SY_OPERATOR,  get_semantic_color("operator",  252), -1);
+    init_pair(SY_MACRO,     get_semantic_color("macro",     182), -1);
+    init_pair(SY_CLASS,     get_semantic_color("class",     151), -1);
+    init_pair(SY_ENUM,      get_semantic_color("enum",      182), -1);
+    init_pair(SY_NAMESPACE, get_semantic_color("namespace", 117), -1);
+    init_pair(SY_VARIABLE,  get_semantic_color("variable",  189), -1);
+    init_pair(SY_PARAMETER, get_semantic_color("parameter", 187), -1);
+    init_pair(SY_PROPERTY,  get_semantic_color("property",  152), -1);
 }
 
 int compute_gutter_width(size_t line_count) {

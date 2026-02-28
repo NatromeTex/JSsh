@@ -39,6 +39,10 @@ static HighlightRule c_rules[] = {
     { "\\b0[0-7]+[uUlL]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9]+\\.[0-9]*([eE][+-]?[0-9]+)?[fFlL]?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9]+[uUlL]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Operators
+    { "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<=|>>=|>>>=|<<|>>>|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|<|>|!|~|\\+|-|\\*|/|%|&|\\||\\^|\\?|:|::)",
+      SEM_OPERATOR, HL_FLAG_NONE, {0}, 0 },
 };
 
 static LanguageHighlighter c_highlighter = {
@@ -276,6 +280,10 @@ static HighlightRule js_rules[] = {
     { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*n\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Operators
+    { "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<=|>>=|>>>=|<<|>>>|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|<|>|!|~|\\+|-|\\*|/|%|&|\\||\\^|\\?|:|::)",
+      SEM_OPERATOR, HL_FLAG_NONE, {0}, 0 },
 };
 
 static LanguageHighlighter js_highlighter = {
@@ -333,6 +341,10 @@ static HighlightRule go_rules[] = {
     { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?i?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*i\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Operators
+    { "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<=|>>=|>>>=|<<|>>>|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|<|>|!|~|\\+|-|\\*|/|%|&|\\||\\^|\\?|:|::)",
+      SEM_OPERATOR, HL_FLAG_NONE, {0}, 0 },
 };
 
 static LanguageHighlighter go_highlighter = {
@@ -405,6 +417,10 @@ static HighlightRule rust_rules[] = {
     { "\\b0[oO][0-7_]+([ui](8|16|32|64|128|size))?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*\\.[0-9_]*([eE][+-]?[0-9_]+)?(f32|f64)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
     { "\\b[0-9][0-9_]*([ui](8|16|32|64|128|size)|f32|f64)?\\b", SEM_NUMBER, HL_FLAG_NONE, {0}, 0 },
+
+    // Operators
+    { "(\\+\\+|--|==|!=|<=|>=|&&|\\|\\||<<=|>>=|>>>=|<<|>>>|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=|<|>|!|~|\\+|-|\\*|/|%|&|\\||\\^|\\?|:|::)",
+      SEM_OPERATOR, HL_FLAG_NONE, {0}, 0 },
 };
 
 static LanguageHighlighter rust_highlighter = {
@@ -747,21 +763,21 @@ void semantic_token_push(Buffer *buf, const SemanticToken *tok) {
 
 int color_for_semantic_kind(SemanticKind kind) {
     switch (kind) {
-        case SEM_KEYWORD:   return SY_KEYWORD;
-        case SEM_TYPE:      return SY_TYPE;
-        case SEM_CLASS:     return SY_TYPE;
-        case SEM_STRUCT:    return SY_TYPE;
-        case SEM_ENUM:      return SY_TYPE;
-        case SEM_NAMESPACE: return SY_TYPE;
-        case SEM_FUNCTION:  return SY_FUNCTION;
-        case SEM_VARIABLE:  return SY_KEYWORD;   // Use keyword color for variables
-        case SEM_PARAMETER: return SY_KEYWORD;   // Use keyword color for parameters
-        case SEM_PROPERTY:  return SY_FUNCTION;  // Use function color for properties
-        case SEM_MACRO:     return SY_FUNCTION;  // Macros in function color
-        case SEM_STRING:    return SY_STRING;
-        case SEM_NUMBER:    return SY_NUMBER;
-        case SEM_COMMENT:   return SY_COMMENT;
-        case SEM_OPERATOR:  return 0;            // No special color for operators
+    case SEM_KEYWORD:   return SY_KEYWORD;
+    case SEM_TYPE:      return SY_TYPE;
+    case SEM_CLASS:     return SY_CLASS;
+    case SEM_STRUCT:    return SY_CLASS;
+    case SEM_ENUM:      return SY_ENUM;
+    case SEM_NAMESPACE: return SY_NAMESPACE;
+    case SEM_FUNCTION:  return SY_FUNCTION;
+    case SEM_VARIABLE:  return SY_VARIABLE;
+    case SEM_PARAMETER: return SY_PARAMETER;
+    case SEM_PROPERTY:  return SY_PROPERTY;
+    case SEM_MACRO:     return SY_MACRO;
+    case SEM_STRING:    return SY_STRING;
+    case SEM_NUMBER:    return SY_NUMBER;
+    case SEM_COMMENT:   return SY_COMMENT;
+    case SEM_OPERATOR:  return SY_OPERATOR;
         default:            return 0;
     }
 }

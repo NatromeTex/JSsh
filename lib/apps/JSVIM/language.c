@@ -33,10 +33,14 @@ FileType detect_filetype(const char *filename) {
         strcmp(ext, "hpp") == 0 || strcmp(ext, "hxx") == 0 || strcmp(ext, "hh") == 0)
         return FT_CPP;
 
-    // JavaScript/TypeScript
+    // JavaScript / JSX
     if (strcmp(ext, "js") == 0 || strcmp(ext, "mjs") == 0 || strcmp(ext, "cjs") == 0 ||
-        strcmp(ext, "ts") == 0 || strcmp(ext, "tsx") == 0 || strcmp(ext, "jsx") == 0)
+        strcmp(ext, "jsx") == 0)
         return FT_JS;
+
+    // TypeScript / TSX
+    if (strcmp(ext, "ts") == 0 || strcmp(ext, "tsx") == 0)
+        return FT_TS;
 
     // Python
     if (strcmp(ext, "py") == 0 || strcmp(ext, "pyw") == 0 || strcmp(ext, "pyi") == 0)

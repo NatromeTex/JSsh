@@ -487,6 +487,40 @@ net.ssh("user@192.168.1.2")
 
 ---
 
+## `net.scp(conn, localPath, remotePath, direction)`
+
+* **Description**: Transfers a single file to or from a remote host over SSH using SFTP (no external `scp` binary).
+* **Parameters**:
+  * `conn` (string): Connection string, same format as `net.ssh` (e.g. `"user@host"`, `"host:2222"`, `"user@host:2222"`).
+  * `localPath` (string): Path to the local file.
+  * `remotePath` (string):
+    * For uploads: remote directory where the file will be placed.
+    * For downloads: full remote file path to fetch.
+  * `direction` (string):
+    * `"up"` / `"upload"` – upload local → remote.
+    * `"down"` / `"download"` – download remote → local.
+* **Examples**:
+
+Upload a file:
+
+```js
+// Copies ./file.txt to /home/user/file.txt on the remote host
+net.scp("user@192.168.1.2:22", "./file.txt", "/home/user", "up")
+```
+
+Download a file:
+
+```js
+// Copies /home/user/file.txt on the remote host into ./file_copy.txt locally
+net.scp("user@192.168.1.2", "./file_copy.txt", "/home/user/file.txt", "down")
+```
+
+* **Behavior**:
+  * Uses the same host-key verification and password prompt flow as `net.ssh`.
+  * Overwrites `localPath` on download and creates/truncates the remote file on upload.
+
+---
+
 ## `net.ping(IP)`
 
 * **Description**: Pings the given IP address and returns responses.
