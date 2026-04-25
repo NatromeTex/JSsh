@@ -1,6 +1,7 @@
 // repl.c
 #include <pwd.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,10 +14,6 @@
 #include "utils.h"
 #include "quickjs.h"
 #include "quickjs-libc.h"
-#include "utils.h"
-#include "func.h"
-#include "sys.h"
-#include "env.h"
 
 // Network package
 #ifdef ENABLE_NETWORK
@@ -55,6 +52,14 @@ static void js_init_app(JSContext *ctx) {}
 #endif
 
 extern const char *history_file;
+
+static volatile sig_atomic_t g_shutdown = 0;
+
+static void handle_exit_signal(int sig) {
+    (void)sig;
+    g_shutdown = 1;
+    rl_done = 1;
+}
 
 int main(int argc, char **argv) {
     JSRuntime *rt = JS_NewRuntime();
@@ -122,6 +127,9 @@ int main(int argc, char **argv) {
     init_history_file(); // sets history path to ~/.jssh_history
     read_history(history_file);  // loads ~/.jssh_history if exists
 
+    signal(SIGTERM, handle_exit_signal);
+    signal(SIGHUP,  handle_exit_signal);
+
     // Load env file for settings
     char envpath[512];
     snprintf(envpath, sizeof(envpath), "%s/.jssh_env", home);
@@ -129,13 +137,13 @@ int main(int argc, char **argv) {
 
     char host[256];
     if (gethostname(host, sizeof(host)) != 0)
-        strcpy(host, "unknown");
+        snprintf(host, sizeof(host), "unknown");
 
     char cwd[PATH_MAX];
 
     while (1) {
         if (getcwd(cwd, sizeof(cwd)) == NULL)
-            strcpy(cwd, "?");
+            snprintf(cwd, sizeof(cwd), "?");
 
         // Prompt with readline-safe escapes
         char prompt[PATH_MAX + 512];
@@ -154,7 +162,8 @@ int main(int argc, char **argv) {
         }
 
         char *line = readline(prompt);
-        if (!line) { // EOF (Ctrl-D)
+        if (!line || g_shutdown) { // EOF (Ctrl-D) or SIGTERM/SIGHUP
+            free(line);
             printf("\n");
             break;
         }

@@ -64,6 +64,9 @@ static JSValue js_sys_read(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     if (JS_ToInt32(ctx, &fd, argv[0]) || JS_ToInt32(ctx, &len, argv[1]))
         return JS_EXCEPTION;
 
+    if (fd < 0)
+        return JS_ThrowTypeError(ctx, "read: invalid file descriptor %d", fd);
+
     uint8_t *buf = js_malloc(ctx, len);
     if (!buf) return JS_EXCEPTION;
 
@@ -89,6 +92,9 @@ static JSValue js_sys_write(JSContext *ctx, JSValueConst this_val, int argc, JSV
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
 
+    if (fd < 0)
+        return JS_ThrowTypeError(ctx, "write: invalid file descriptor %d", fd);
+
     size_t len;
     const char *data = JS_ToCStringLen(ctx, &len, argv[1]);
     if (!data) return JS_EXCEPTION;
@@ -110,6 +116,9 @@ static JSValue js_sys_close(JSContext *ctx, JSValueConst this_val, int argc, JSV
     int fd;
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
+
+    if (fd < 0)
+        return JS_ThrowTypeError(ctx, "close: invalid file descriptor %d", fd);
 
     if (close(fd) < 0)
         return JS_ThrowInternalError(ctx, "close failed: %s", strerror(errno));

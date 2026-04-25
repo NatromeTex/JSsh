@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include "sys.h"
@@ -179,19 +180,48 @@ char* rl_line_buffer_slice(int start, int end) {
     return slice;
 }
 
+// Run make via fork+execvp; returns 0 on success, -1 on failure.
+static int run_make(char **make_argv) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return -1;
+    }
+    if (pid == 0) {
+        execvp("make", make_argv);
+        perror("execvp make");
+        _exit(1);
+    }
+    int status;
+    pid_t r;
+    do { r = waitpid(pid, &status, 0); } while (r == -1 && errno == EINTR);
+    if (r == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        return -1;
+    return 0;
+}
+
 // update
 JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    // Save current history
     write_history(history_file);
 
-    char cmd[2048];
-
     if (argc == 0) {
-        snprintf(cmd, sizeof(cmd), "make clean && make");
+        // No user input — safe literal command
+        char *clean_argv[] = { "make", "clean", NULL };
+        if (run_make(clean_argv) != 0) {
+            fprintf(stderr, "update: make clean failed\n");
+            return JS_UNDEFINED;
+        }
+        char *build_argv[] = { "make", NULL };
+        if (run_make(build_argv) != 0) {
+            fprintf(stderr, "update: make failed\n");
+            return JS_UNDEFINED;
+        }
     } else {
+        // Build modules string with length tracking (no shell expansion risk
+        // because we pass args directly to execvp, not through a shell).
         char modules[1024];
+        int modules_len = 0;
         modules[0] = '\0';
-
         int do_install = 0;
 
         for (int i = 0; i < argc; i++) {
@@ -204,36 +234,38 @@ JSValue js_update(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                 continue;
             }
 
-            if (modules[0] != '\0')
-                strcat(modules, " ");
-
-            strcat(modules, arg);
+            int arg_len = (int)strlen(arg);
+            if (modules_len + arg_len + 2 <= (int)sizeof(modules) - 1) {
+                if (modules_len > 0) modules[modules_len++] = ' ';
+                memcpy(modules + modules_len, arg, arg_len);
+                modules_len += arg_len;
+                modules[modules_len] = '\0';
+            }
             JS_FreeCString(ctx, arg);
         }
 
-        if (do_install) {
-            // install mode
-            if (modules[0] == '\0')
-                snprintf(cmd, sizeof(cmd), "make install");
-            else
-                snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\" install", modules);
+        // Build argv for make — no shell, so metacharacters in modules are safe
+        char modules_kv[1200];
+        char *make_argv[8];
+        int ai = 0;
+        make_argv[ai++] = "make";
+        if (modules[0]) {
+            snprintf(modules_kv, sizeof(modules_kv), "MODULES=%s", modules);
+            make_argv[ai++] = modules_kv;
+        }
+        if (do_install)
+            make_argv[ai++] = "install";
+        make_argv[ai] = NULL;
 
-        } else {
-            // normal mode
-            snprintf(cmd, sizeof(cmd), "make MODULES=\"%s\"", modules);
+        if (run_make(make_argv) != 0) {
+            fprintf(stderr, "update: make failed\n");
+            return JS_UNDEFINED;
         }
     }
 
-    int ret = system(cmd);
-    if (ret != 0) {
-        fprintf(stderr, "update: make failed\n");
-        return JS_UNDEFINED;
-    }
-
     char *argv0 = "./bin/jssh";
-    char *args[] = { argv0, NULL };
-    execv(argv0, args);
-
+    char *exec_args[] = { argv0, NULL };
+    execv(argv0, exec_args);
     perror("execv");
     return JS_UNDEFINED;
 }
@@ -591,11 +623,8 @@ void jssh_redisplay(void) {
     }
 
     int prompt_len = visual_width(rl_display_prompt);
-    int line_len = visual_width(line);
-    int pred_len = 0;
-    if (pred.active && pred.text) {
-        pred_len = visual_width(pred.text);
-    }
+    int line_len = visual_width(line); // same as visual_width(rl_line_buffer) — ANSI codes ignored
+    int pred_len = pred.active && pred.text ? (int)strlen(pred.text) : 0;
 
     int total_visual_len = prompt_len + line_len + pred_len;
 
@@ -607,7 +636,7 @@ void jssh_redisplay(void) {
     char *buffer_slice = rl_line_buffer_slice(0, rl_point);
     int cur_visual_pos = visual_width(buffer_slice);
     if (buffer_slice) free(buffer_slice);
-    int line_visual_len = visual_width(rl_line_buffer);
+    int line_visual_len = line_len; // reuse already-computed value
 
     if (rl_point < rl_end || (pred.active && pred.text)) {
         int cols_to_end_of_line = line_visual_len - cur_visual_pos;

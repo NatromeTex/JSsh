@@ -8,14 +8,23 @@
 #include "utils.h"
 #include "quickjs.h"
 
-// ENV file configuration
-typedef struct {
+// ENV file configuration — chaining hash table for O(1) lookup
+
+#define ENV_HASH_SIZE 64
+
+typedef struct EnvNode {
     char *key;
     char *value;
-} EnvEntry;
+    struct EnvNode *next;
+} EnvNode;
 
-static EnvEntry *g_env = NULL;
-static size_t g_env_count = 0;
+static EnvNode *g_hash[ENV_HASH_SIZE];
+
+static unsigned int env_hash_fn(const char *s) {
+    unsigned int h = 5381;
+    while (*s) h = ((h << 5) + h) ^ (unsigned char)*s++;
+    return h % ENV_HASH_SIZE;
+}
 
 // default settings
 static const char *default_env[] = {
@@ -31,19 +40,37 @@ static const char *default_env[] = {
     NULL
 };
 
-// add to env file
+// add or update key in hash table
 void env_add(const char *key, const char *value) {
-    g_env = realloc(g_env, (g_env_count + 1) * sizeof(EnvEntry));
-    g_env[g_env_count].key = strdup(key);
-    g_env[g_env_count].value = strdup(value);
-    g_env_count++;
+    unsigned int idx = env_hash_fn(key);
+    EnvNode *n = g_hash[idx];
+    while (n) {
+        if (strcmp(n->key, key) == 0) {
+            char *new_val = strdup(value);
+            if (new_val) { free(n->value); n->value = new_val; }
+            return;
+        }
+        n = n->next;
+    }
+    EnvNode *node = malloc(sizeof(EnvNode));
+    if (!node) return;
+    node->key = strdup(key);
+    node->value = strdup(value);
+    if (!node->key || !node->value) {
+        free(node->key); free(node->value); free(node);
+        return;
+    }
+    node->next = g_hash[idx];
+    g_hash[idx] = node;
 }
 
-// read setting from env file
+// O(1) lookup
 const char *env_get(const char *key, const char *def) {
-    for (size_t i = 0; i < g_env_count; i++) {
-        if (strcmp(g_env[i].key, key) == 0)
-            return g_env[i].value;
+    unsigned int idx = env_hash_fn(key);
+    EnvNode *n = g_hash[idx];
+    while (n) {
+        if (strcmp(n->key, key) == 0) return n->value;
+        n = n->next;
     }
     return def;
 }
@@ -62,7 +89,7 @@ void env_load(const char *filename) {
             char key[64], val[128];
             if (sscanf(*p, "%63[^=]=%127[^\n]", key, val) == 2) {
                 if (strcmp(key, "jssh_loc") == 0) {
-                    char pathbuf[256];
+                    char pathbuf[PATH_MAX];
                     ssize_t len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf) - 1);
                     if (len != -1) {
                         pathbuf[len] = '\0';
@@ -95,19 +122,20 @@ void env_load(const char *filename) {
     // verify jssh_loc points to this binary, update if wrong
     const char *stored = env_get("jssh_loc", NULL);
     if (stored) {
-        char pathbuf[256];
+        char pathbuf[PATH_MAX];
         ssize_t len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf) - 1);
         if (len != -1) {
             pathbuf[len] = '\0';
             if (strcmp(stored, pathbuf) != 0) {
-                // replace with correct location
                 env_add("jssh_loc", pathbuf);
 
-                // rewrite env file
+                // rewrite env file by iterating hash table
                 f = fopen(filename, "w");
                 if (f) {
-                    for (size_t i = 0; i < g_env_count; i++) {
-                        fprintf(f, "%s=%s\n", g_env[i].key, g_env[i].value);
+                    for (int i = 0; i < ENV_HASH_SIZE; i++) {
+                        for (EnvNode *n = g_hash[i]; n; n = n->next) {
+                            fprintf(f, "%s=%s\n", n->key, n->value);
+                        }
                     }
                     fclose(f);
                 }

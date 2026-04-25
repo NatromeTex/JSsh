@@ -90,7 +90,11 @@ JSValue js_tac(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
                 long line_len = line_end - line_start;
                 if (line_len > 0) {
                     char *line = malloc(line_len + 1);
-                    if (!line) continue;
+                    if (!line) {
+                        fclose(f);
+                        JS_FreeCString(ctx, path);
+                        return JS_ThrowInternalError(ctx, "tac: out of memory");
+                    }
                     if (fseek(f, line_start, SEEK_SET) == 0) {
                         size_t got = fread(line, 1, line_len, f);
                         if (got == (size_t)line_len) {
@@ -109,17 +113,20 @@ JSValue js_tac(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     // First line (if not newline terminated)
     if (line_end > 0) {
         char *line = malloc(line_end + 1);
-        if (line) {
-            if (fseek(f, 0, SEEK_SET) == 0) {
-                size_t got = fread(line, 1, line_end, f);
-                if (got == (size_t)line_end) {
-                    line[line_end] = '\0';
-                    fwrite(line, 1, line_end, stdout);
-                    fputc('\n', stdout);
-                }
-            }
-            free(line);
+        if (!line) {
+            fclose(f);
+            JS_FreeCString(ctx, path);
+            return JS_ThrowInternalError(ctx, "tac: out of memory");
         }
+        if (fseek(f, 0, SEEK_SET) == 0) {
+            size_t got = fread(line, 1, line_end, f);
+            if (got == (size_t)line_end) {
+                line[line_end] = '\0';
+                fwrite(line, 1, line_end, stdout);
+                fputc('\n', stdout);
+            }
+        }
+        free(line);
     }
 
     fclose(f);
