@@ -493,7 +493,9 @@ static void apply_text_replace(Buffer *buf,
                     char *line = buf->lines[current_line];
                     size_t line_len = strlen(line);
                     if (insert_col > line_len) insert_col = line_len;
-                    line = realloc(line, line_len + seg_len + 1);
+                    char *tmp_seg = realloc(line, line_len + seg_len + 1);
+                    if (!tmp_seg) break;
+                    line = tmp_seg;
                     memmove(line + insert_col + seg_len, line + insert_col,
                             line_len - insert_col + 1);
                     memcpy(line + insert_col, seg_start, seg_len);
@@ -724,7 +726,9 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                                ed->cursor_line + 1, nextlen,
                                buf->lines[ed->cursor_line + 1],
                                before, after);
-                line = realloc(line, len + nextlen + 1);
+                char *tmp_fwd = realloc(line, len + nextlen + 1);
+                if (!tmp_fwd) break;
+                line = tmp_fwd;
                 memcpy(line + len, buf->lines[ed->cursor_line + 1], nextlen + 1);
                 buf->lines[ed->cursor_line] = line;
                 free(buf->lines[ed->cursor_line + 1]);
@@ -766,7 +770,9 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                            ed->cursor_line, curlen,
                            buf->lines[ed->cursor_line],
                            before, after);
-            buf->lines[ed->cursor_line - 1] = realloc(buf->lines[ed->cursor_line - 1], prevlen + curlen + 1);
+            char *tmp_bwd = realloc(buf->lines[ed->cursor_line - 1], prevlen + curlen + 1);
+            if (!tmp_bwd) break;
+            buf->lines[ed->cursor_line - 1] = tmp_bwd;
             memcpy(buf->lines[ed->cursor_line - 1] + prevlen, buf->lines[ed->cursor_line], curlen + 1);
             free(buf->lines[ed->cursor_line]);
             // shift lines up
@@ -792,7 +798,9 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
                            ed->cursor_line, ed->cursor_col,
                            indent,
                            before, after);
-            line = realloc(line, len + indent_len + 1);
+            char *tmp_tab = realloc(line, len + indent_len + 1);
+            if (!tmp_tab) break;
+            line = tmp_tab;
             memmove(line + ed->cursor_col + indent_len, line + ed->cursor_col, len - ed->cursor_col + 1);
             memcpy(line + ed->cursor_col, indent, indent_len);
             buf->lines[ed->cursor_line] = line;
@@ -991,7 +999,9 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
 
                 char *line = buf->lines[ed->cursor_line];
                 size_t len = strlen(line);
-                line = realloc(line, len + 3);  // +2 for both chars, +1 for null
+                char *tmp_br = realloc(line, len + 3);  // +2 for both chars, +1 for null
+                if (!tmp_br) break;
+                line = tmp_br;
                 memmove(line + ed->cursor_col + 2, line + ed->cursor_col, len - ed->cursor_col + 1);
                 line[ed->cursor_col] = (char)ch;
                 line[ed->cursor_col + 1] = closing;
@@ -1014,7 +1024,9 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
 
                 char *line = buf->lines[ed->cursor_line];
                 size_t len = strlen(line);
-                line = realloc(line, len + 2);
+                char *tmp_ch = realloc(line, len + 2);
+                if (!tmp_ch) break;
+                line = tmp_ch;
                 memmove(line + ed->cursor_col + 1, line + ed->cursor_col, len - ed->cursor_col + 1);
                 line[ed->cursor_col] = (char)ch;
                 buf->lines[ed->cursor_line] = line;
@@ -1038,6 +1050,64 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         }
         buf->lsp_dirty = 0;
     }
+}
+
+// Shared save logic for :w and :wq/:x.  If and_quit is set, ed->quit is
+// raised on a successful write.  Returns 1 if the save was attempted and
+// succeeded, 0 otherwise (no filename, user aborted, or write error).
+static int do_save_cmd(EditorState *ed, WINDOW *cmd_win, int maxx, int and_quit) {
+    Buffer *buf = &ed->buf;
+
+    if (!ed->have_filename || strlen(ed->filename) == 0) {
+        const char *pr = "Enter filename: ";
+        echo();
+        curs_set(1);
+        wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+        for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
+        mvwprintw(cmd_win, 0, 1, "%s", pr);
+        wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+        wrefresh(cmd_win);
+        char fnamebuf[1024];
+        memset(fnamebuf, 0, sizeof(fnamebuf));
+        mvwgetnstr(cmd_win, 0, 1 + (int)strlen(pr), fnamebuf, sizeof(fnamebuf) - 1);
+        noecho();
+        if (strlen(fnamebuf) > 0) {
+            snprintf(ed->filename, sizeof(ed->filename), "%s", fnamebuf);
+            ed->have_filename = 1;
+        }
+    }
+
+    if (!ed->have_filename)
+        return 0;
+
+    if (!file_exists(ed->filename)) {
+        char qbuf[128];
+        snprintf(qbuf, sizeof(qbuf), "Create %.63s and write to it? (Y/n): ", ed->filename);
+        wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+        for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
+        mvwprintw(cmd_win, 0, 1, "%s", qbuf);
+        wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+        wrefresh(cmd_win);
+        int r = getch();
+        if (r == 'n' || r == 'N')
+            return 0;
+    }
+
+    if (save_file(buf, ed->filename) == 0) {
+        ed->modified = 0;
+        ed->existing_file = 1;
+        ed->file_created = 1;
+        if (and_quit)
+            ed->quit = 1;
+        return 1;
+    }
+
+    wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
+    mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
+    wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
+    wrefresh(cmd_win);
+    return 0;
 }
 
 void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int maxx) {
@@ -1089,131 +1159,9 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
                 ed->force_quit = 1;
                 ed->quit = 1;
             } else if (strcmp(ed->cmdbuf, "w") == 0) {
-                if (!ed->have_filename || strlen(ed->filename) == 0) {
-                    // prompt for filename in command window
-                    const char *pr = "Enter filename: ";
-                    echo();
-                    curs_set(1);
-                    wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                    for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                    mvwprintw(cmd_win, 0, 1, "%s", pr);
-                    wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                    wrefresh(cmd_win);
-                    char fnamebuf[1024];
-                    memset(fnamebuf, 0, sizeof(fnamebuf));
-                    mvwgetnstr(cmd_win, 0, 1 + (int)strlen(pr), fnamebuf, sizeof(fnamebuf)-1);
-                    noecho();
-                    if (strlen(fnamebuf) > 0) {
-                        snprintf(ed->filename, sizeof(ed->filename), "%s", fnamebuf);
-                        ed->have_filename = 1;
-                    }
-                }
-                if (ed->have_filename) {
-                    if (!file_exists(ed->filename)) {
-                        // ask create?
-                        char qbuf[128];
-                        char fname_short[64];
-                        snprintf(fname_short, sizeof(fname_short), "%.63s", ed->filename);
-                        snprintf(qbuf, sizeof(qbuf), "Create %s and write to it? (Y/n): ", fname_short);
-                        wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                        for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                        mvwprintw(cmd_win, 0, 1, "%s", qbuf);
-                        wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                        wrefresh(cmd_win);
-                        int r = getch();
-                        if (r == 'n' || r == 'N') {
-                            // abort save
-                        } else {
-                            // proceed to save
-                            if (save_file(buf, ed->filename) == 0) {
-                                ed->modified = 0;
-                                ed->existing_file = 1;
-                                ed->file_created = 1;
-                            } else {
-                                // show error briefly
-                                wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                                for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                                mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
-                                wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                                wrefresh(cmd_win);
-                            }
-                        }
-                    } else {
-                        if (save_file(buf, ed->filename) == 0) {
-                            ed->modified = 0;
-                            ed->file_created = 1;
-                        } else {
-                            wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                            for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                            mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
-                            wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                            wrefresh(cmd_win);
-                        }
-                    }
-                }
+                do_save_cmd(ed, cmd_win, maxx, 0);
             } else if (strcmp(ed->cmdbuf, "wq") == 0 || strcmp(ed->cmdbuf, "x") == 0) {
-                if (!ed->have_filename || strlen(ed->filename) == 0) {
-                    // prompt for filename
-                    const char *pr = "Enter filename: ";
-                    echo();
-                    curs_set(1);
-                    wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                    for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                    mvwprintw(cmd_win, 0, 1, "%s", pr);
-                    wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                    wrefresh(cmd_win);
-                    char fnamebuf[1024];
-                    memset(fnamebuf, 0, sizeof(fnamebuf));
-                    mvwgetnstr(cmd_win, 0, 1 + (int)strlen(pr), fnamebuf, sizeof(fnamebuf)-1);
-                    noecho();
-                    if (strlen(fnamebuf) > 0) {
-                        snprintf(ed->filename, sizeof(ed->filename), "%s", fnamebuf);
-                        ed->have_filename = 1;
-                    }
-                }
-                if (ed->have_filename) {
-                    if (!file_exists(ed->filename)) {
-                        // ask create?
-                        char qbuf[128];
-                        char fname_short[64];
-                        snprintf(fname_short, sizeof(fname_short), "%.63s", ed->filename);
-                        snprintf(qbuf, sizeof(qbuf), "Create %s and write to it? (Y/n): ", fname_short);
-                        wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                        for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                        mvwprintw(cmd_win, 0, 1, "%s", qbuf);
-                        wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                        wrefresh(cmd_win);
-                        int r = getch();
-                        if (r == 'n' || r == 'N') {
-                            // abort save+quit
-                        } else {
-                            if (save_file(buf, ed->filename) == 0) {
-                                ed->modified = 0;
-                                ed->existing_file = 1;
-                                ed->file_created = 1;
-                                ed->quit = 1;
-                            } else {
-                                wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                                for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                                mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
-                                wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                                wrefresh(cmd_win);
-                            }
-                        }
-                    } else {
-                        if (save_file(buf, ed->filename) == 0) {
-                            ed->modified = 0;
-                            ed->file_created = 1;
-                            ed->quit = 1;
-                        } else {
-                            wattron(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                            for (int i = 0; i < maxx; i++) mvwaddch(cmd_win, 0, i, ' ');
-                            mvwprintw(cmd_win, 0, 1, "Error writing %s", ed->filename);
-                            wattroff(cmd_win, COLOR_PAIR(COLOR_PAIR_STATUS));
-                            wrefresh(cmd_win);
-                        }
-                    }
-                }
+                do_save_cmd(ed, cmd_win, maxx, 1);
             } else if (strcmp(ed->cmdbuf, "set rel") == 0) {
                 // set relative line numbers
                 ed->line_number_relative = 1;

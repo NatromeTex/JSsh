@@ -194,7 +194,9 @@ void lsp_send(struct LSPProcess *p, const char *json) {
 }
 
 void lsp_append_data(struct LSPProcess *p, const char *data, size_t n) {
-    p->lsp_accum = realloc(p->lsp_accum, p->lsp_accum_len + n);
+    char *tmp = realloc(p->lsp_accum, p->lsp_accum_len + n);
+    if (!tmp) return;
+    p->lsp_accum = tmp;
     memcpy(p->lsp_accum + p->lsp_accum_len, data, n);
     p->lsp_accum_len += n;
 }

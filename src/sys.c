@@ -405,6 +405,69 @@ static JSValue js_getram(JSContext *ctx, JSValueConst this_val, int argc, JSValu
   return JS_NewFloat64(ctx, -1);
 }
 
+// sys.getgpu() -> { vendor, model }
+// Tries NVIDIA (/proc/driver/nvidia), then AMD/Intel (/sys/class/drm/card0).
+static JSValue js_getgpu(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "vendor", JS_NewString(ctx, "unknown"));
+    JS_SetPropertyStr(ctx, obj, "model",  JS_NewString(ctx, "unknown"));
+
+    // NVIDIA: each GPU has a directory under /proc/driver/nvidia/gpus/
+    DIR *nv = opendir("/proc/driver/nvidia/gpus");
+    if (nv) {
+        struct dirent *ent;
+        while ((ent = readdir(nv)) != NULL) {
+            if (ent->d_name[0] == '.') continue;
+            char info_path[PATH_MAX];
+            snprintf(info_path, sizeof(info_path),
+                     "/proc/driver/nvidia/gpus/%s/information", ent->d_name);
+            FILE *f = fopen(info_path, "r");
+            if (!f) continue;
+            char line[256];
+            while (fgets(line, sizeof(line), f)) {
+                if (strncmp(line, "Model:", 6) == 0) {
+                    char *m = line + 6;
+                    while (*m == ' ' || *m == '\t') m++;
+                    m[strcspn(m, "\n")] = '\0';
+                    JS_SetPropertyStr(ctx, obj, "vendor", JS_NewString(ctx, "NVIDIA"));
+                    JS_SetPropertyStr(ctx, obj, "model",  JS_NewString(ctx, m));
+                    break;
+                }
+            }
+            fclose(f);
+            break; // only report first GPU
+        }
+        closedir(nv);
+        return obj;
+    }
+
+    // AMD / Intel: sysfs exposes product_name and vendor id for card0
+    FILE *pf = fopen("/sys/class/drm/card0/device/product_name", "r");
+    if (pf) {
+        char name[256] = {0};
+        if (fgets(name, sizeof(name), pf))
+            name[strcspn(name, "\n")] = '\0';
+        fclose(pf);
+        if (name[0])
+            JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, name));
+    }
+
+    FILE *vf = fopen("/sys/class/drm/card0/device/vendor", "r");
+    if (vf) {
+        char vid_str[32] = {0};
+        if (fgets(vid_str, sizeof(vid_str), vf)) {
+            long vid = strtol(vid_str, NULL, 16);
+            const char *vendor = "unknown";
+            if      (vid == 0x1002) vendor = "AMD";
+            else if (vid == 0x8086) vendor = "Intel";
+            JS_SetPropertyStr(ctx, obj, "vendor", JS_NewString(ctx, vendor));
+        }
+        fclose(vf);
+    }
+
+    return obj;
+}
+
 // sys.sudo()
 static JSValue js_sudo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     // Get the path to the current executable
@@ -478,6 +541,7 @@ void js_init_sys(JSContext *ctx) {
     JS_SetPropertyStr(ctx, sys, "getpkgCount", JS_NewCFunction(ctx, js_sys_getLibCount, "getpkgCount", 0));
     JS_SetPropertyStr(ctx, sys, "getcpu", JS_NewCFunction(ctx, js_getcpu, "getcpu", 0));
     JS_SetPropertyStr(ctx, sys, "getram", JS_NewCFunction(ctx, js_getram, "getram", 0));
+    JS_SetPropertyStr(ctx, sys, "getgpu", JS_NewCFunction(ctx, js_getgpu, "getgpu", 0));
     JS_SetPropertyStr(ctx, sys, "arch", JS_NewCFunction(ctx, js_arch, "arch", 0));
     JS_SetPropertyStr(ctx, sys, "sudo", JS_NewCFunction(ctx, js_sudo, "sudo", 0));
 

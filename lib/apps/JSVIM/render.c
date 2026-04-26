@@ -277,14 +277,11 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
     // status content: filename (truncated), mode, modified, clock
     wattron(main_win, COLOR_PAIR(COLOR_PAIR_STATUS));
     char status_left[256];
+    const char *mod_suffix = modified ? " [+]" : "";
     if (have_filename) {
-        char fname_short[240];
-        strncpy(fname_short, filename, sizeof(fname_short) - 1);
-        fname_short[sizeof(fname_short) - 1] = '\0';
-        const char *mod_suffix = modified ? " [+]" : "";
-        snprintf(status_left, sizeof(status_left), "%s%s", fname_short, mod_suffix);
+        snprintf(status_left, sizeof(status_left), "%.*s%s",
+                 (int)(sizeof(status_left) - sizeof(" [+]")), filename, mod_suffix);
     } else {
-        const char *mod_suffix = modified ? " [+]" : "";
         snprintf(status_left, sizeof(status_left), "[No Name]%s", mod_suffix);
     }
     const char *mode_str = mode_insert ? "-- INSERT --" : "-- COMMAND --";
@@ -339,81 +336,73 @@ void render_command_window(WINDOW *cmd_win, Buffer *buf,
     }
 }
 
+// Walk lines from the start and return the line number whose cumulative visual
+// row count first reaches or exceeds target_row. Used for scroll adjustment.
+// accum_mode=0: stop when accum > target (scroll-up); =1: stop when accum >= target (scroll-down).
+static size_t row_to_line(Buffer *buf, int target_row, int col_offset, int maxx, int accum_mode) {
+    int accum = 0;
+    size_t result = 0;
+    for (size_t ln = 0; ln < buf->count; ln++) {
+        const char *s = buf->lines[ln];
+        int col = col_offset;
+        for (size_t i = 0; s[i]; i++) {
+            if (col >= maxx - 1) { accum++; col = col_offset; }
+            col++;
+        }
+        accum++;
+        if (accum_mode == 0) {
+            if (accum > target_row) break;
+            result = ln + 1;
+        } else {
+            if (accum >= target_row) { result = ln; break; }
+            result = ln + 1;
+        }
+    }
+    return result;
+}
+
 void compute_cursor_position(Buffer *buf, size_t cursor_line, size_t cursor_col,
                             int col_offset, int maxx, int visible_rows,
                             size_t *scroll_y, int *cy, int *cx) {
-    // Compute cursor screen position: need to compute wrapped rows up to cursor_line and cursor_col
     int rows_before_cursor = 0;
     int cursor_screen_col = col_offset;
-    
+
+    // Count visual rows before cursor_line
     for (size_t ln = 0; ln < cursor_line; ln++) {
         const char *s = buf->lines[ln];
         int col = col_offset;
-        size_t i = 0;
-        while (s[i]) {
+        for (size_t i = 0; s[i]; i++) {
             if (col >= maxx - 1) { rows_before_cursor++; col = col_offset; }
-            col++; i++;
+            col++;
         }
-        rows_before_cursor++; // last partial row of the line
+        rows_before_cursor++;
     }
-    
-    // now on cursor_line
+
+    // Count visual columns within cursor_line up to cursor_col
     {
         const char *s = buf->lines[cursor_line];
         int col = col_offset;
-        size_t i = 0;
-        while (s[i] && i < cursor_col) {
+        for (size_t i = 0; s[i] && i < cursor_col; i++) {
             if (col >= maxx - 1) { rows_before_cursor++; col = col_offset; }
-            col++; i++;
+            col++;
         }
         cursor_screen_col = col;
     }
 
     *cy = rows_before_cursor - (int)*scroll_y + 1;
-    
+
     if (*cy < 1) {
-        // scroll up so cursor becomes the first visible row
-        int accum = 0;
-        size_t new_scroll = 0;
-        for (size_t ln = 0; ln < buf->count; ln++) {
-            const char *s = buf->lines[ln];
-            int col = col_offset;
-            size_t i = 0;
-            while (s[i]) {
-                if (col >= maxx - 1) { accum++; col = col_offset; }
-                col++; i++;
-            }
-            accum++;
-            if (accum > rows_before_cursor) break;
-            new_scroll = ln + 1;
-        }
-        *scroll_y = new_scroll;
+        *scroll_y = row_to_line(buf, rows_before_cursor, col_offset, maxx, 0);
         *cy = 1;
     } else if (*cy > visible_rows) {
-        // scroll down so cursor becomes the last visible row
-        int target = rows_before_cursor - visible_rows + 1;
-        int accum = 0;
-        size_t new_scroll = 0;
-        for (size_t ln = 0; ln < buf->count; ln++) {
-            const char *s = buf->lines[ln];
-            int col = col_offset;
-            size_t i = 0;
-            while (s[i]) {
-                if (col >= maxx - 1) { accum++; col = col_offset; }
-                col++; i++;
-            }
-            accum++;
-            if (accum >= target) { new_scroll = ln; break; }
-            new_scroll = ln + 1;
-        }
-        *scroll_y = new_scroll;
+        *scroll_y = row_to_line(buf, rows_before_cursor - visible_rows + 1, col_offset, maxx, 1);
         *cy = visible_rows;
     }
 
     *cx = cursor_screen_col;
     if (*cx < col_offset) *cx = col_offset;
     if (*cx > maxx - 2) *cx = maxx - 2;
-    
+
     int gutter_width = compute_gutter_width(buf->count);
     if (*cx < gutter_width + 2) *cx = gutter_width + 2;
 }

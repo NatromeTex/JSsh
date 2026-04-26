@@ -2,7 +2,7 @@
 /* When I was in college, our first UNIX Class had us coding in bash, awk and all those god-awful
 *  Scripting languages. One thing was common in all those scripts though, vi, the simple text editor
 *  That runs in the terminal with such unintuitive controls I swear to god Tax codes are more clearer
-*  on the matter. While I am sure you can rebind the controls but First impressions last...
+*  on the matter. While I am sure you can rebind the controls, First impressions last...
 */
 
 #include <ncurses.h>
@@ -154,6 +154,12 @@ int main(int argc, char **argv) {
             }
         }
     }
+
+/* And to be fair, LLM usage has been a little on the heavier side in this project. I handled the idea and basic code while claude did
+*  optimisations and efficiency patches. While I do know that not all of this is my work, I still can't help but feel proud of it. All
+*  I started with was an idea and the most basic of knowledge about C, I did learn a lot and saw how things work and did not work. It 
+*  has been fun to work on this, even now, exactly 8 months later.
+*/
     
     ed.buf.ft = detect_filetype(ed.filename);
     strncpy(ed.buf.filepath, ed.filename, sizeof(ed.buf.filepath) - 1);
@@ -174,22 +180,29 @@ int main(int argc, char **argv) {
     WINDOW *cmd_win = NULL;
     const char *title = "JSVIM";
     int ch;
+    int last_maxy = 0, last_maxx = 0;
 
     while (!ed.quit) {
         editor_process_lsp(&ed);
-        
+
         getmaxyx(stdscr, maxy, maxx);
-        
-        if (main_win) delwin(main_win);
-        if (cmd_win) delwin(cmd_win);
-        
-        main_win = newwin(maxy - 1, maxx, 0, 0);
-        keypad(main_win, TRUE);
-        wtimeout(main_win, 200);
-        
-        cmd_win = newwin(1, maxx, maxy - 1, 0);
-        keypad(cmd_win, TRUE);
-        wtimeout(cmd_win, 200);
+
+        // Only rebuild windows when the terminal is resized
+        if (main_win == NULL || maxy != last_maxy || maxx != last_maxx) {
+            if (main_win) delwin(main_win);
+            if (cmd_win)  delwin(cmd_win);
+
+            main_win = newwin(maxy - 1, maxx, 0, 0);
+            keypad(main_win, TRUE);
+            wtimeout(main_win, 200);
+
+            cmd_win = newwin(1, maxx, maxy - 1, 0);
+            keypad(cmd_win, TRUE);
+            wtimeout(cmd_win, 200);
+
+            last_maxy = maxy;
+            last_maxx = maxx;
+        }
 
         int gutter_width = compute_gutter_width(ed.buf.count);
         int col_offset = gutter_width + 2;

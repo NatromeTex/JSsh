@@ -456,104 +456,168 @@ void init_qol_bindings(void) {
     rl_bind_key('\t', jssh_tab_handler);
 }
 
-// Syntax Highliting
-#define CLR_RESET   "\033[0m"
-#define CLR_KEYWORD "\033[38;2;85;130;231m"  // blue
-#define CLR_OBJECT  "\033[38;2;116;180;214m" // light blue
-#define CLR_STRING  "\033[38;2;206;145;120m"  // brown
-#define CLR_NUMBER  "\033[38;2;148;206;110m"  // faded yellow
-#define CLR_FUNCTION "\033[38;2;220;220;110m" // yelow
+// Syntax Highlighting
+#define CLR_RESET    "\033[0m"
+#define CLR_KEYWORD  "\033[38;2;85;130;231m"
+#define CLR_OBJECT   "\033[38;2;116;180;214m"
+#define CLR_STRING   "\033[38;2;206;145;120m"
+#define CLR_NUMBER   "\033[38;2;148;206;110m"
+#define CLR_FUNCTION "\033[38;2;220;220;110m"
+#define CLR_COMMENT  "\033[38;2;106;153;85m"
 
-static const char *js_keywords[] = {
-    "function","return","if","else","while","for","var","let","const",
-    "true","false","null","undefined","new","class","import","export",NULL
+// Lengths precomputed via sizeof to avoid strlen() in the hot loop
+#define KW(s) { s, (int)(sizeof(s)-1) }
+static const struct { const char *word; int len; } js_keywords[] = {
+    KW("function"), KW("return"), KW("if"),    KW("else"),   KW("while"),
+    KW("for"),      KW("var"),    KW("let"),   KW("const"),  KW("true"),
+    KW("false"),    KW("null"),   KW("undefined"), KW("new"), KW("class"),
+    KW("import"),   KW("export"), { NULL, 0 }
 };
-static const char *js_objects[] = {
-    "fs", "cmp", "net", "crypt", "sys", "git", NULL 
+static const struct { const char *word; int len; } js_objects[] = {
+    KW("fs"), KW("cmp"), KW("net"), KW("crypt"), KW("sys"), KW("git"),
+    { NULL, 0 }
 };
+#undef KW
+
+// Append a compile-time-known color code string using sizeof instead of strlen
+#define APPEND_CLR(dst, clr) do { \
+    memcpy((dst), (clr), sizeof(clr)-1); (dst) += sizeof(clr)-1; \
+} while (0)
 
 static char *highlight_line(const char *line) {
-    size_t cap = strlen(line) * 10 + 64;
-    char *out = malloc(cap);
+    size_t in_len = strlen(line);
+    // 26 bytes per input char covers worst case: single char token wrapped in
+    // longest color code (20 bytes) + reset (4 bytes) = 25 bytes overhead.
+    char *out = malloc(in_len * 26 + 64);
     if (!out) return NULL;
 
     char *dst = out;
     const char *p = line;
 
     while (*p) {
-        int matched = 0;
+        // Single-line comment: rest of line gets comment color
+        if (p[0] == '/' && p[1] == '/') {
+            size_t rest = strlen(p);
+            APPEND_CLR(dst, CLR_COMMENT);
+            memcpy(dst, p, rest); dst += rest;
+            APPEND_CLR(dst, CLR_RESET);
+            p += rest;
+            continue;
+        }
 
-        // keywords (must be full word)
-        for (int i = 0; js_keywords[i]; i++) {
-            size_t len = strlen(js_keywords[i]);
-            if (strncmp(p, js_keywords[i], len) == 0) {
-                char next = p[len];
-                char prev = (p > line) ? p[-1] : '\0';
-                if ((next == '\0' || isspace((unsigned char)next) || next == '(') &&
-                    (prev == '\0' || (!isalnum((unsigned char)prev) && prev != '_'))) {
-                    dst += sprintf(dst, "%s%.*s%s", CLR_KEYWORD, (int)len, p, CLR_RESET);
-                    p += len;
-                    matched = 1;
-                    break;
-                }
+        // Block comment
+        if (p[0] == '/' && p[1] == '*') {
+            const char *end = strstr(p + 2, "*/");
+            size_t len = end ? (size_t)(end - p + 2) : strlen(p);
+            APPEND_CLR(dst, CLR_COMMENT);
+            memcpy(dst, p, len); dst += len;
+            APPEND_CLR(dst, CLR_RESET);
+            p += len;
+            continue;
+        }
+
+        // Strings: " ' ` with escape sequence handling
+        if (*p == '"' || *p == '\'' || *p == '`') {
+            char quote = *p;
+            const char *start = p++;
+            while (*p && *p != quote) {
+                if (*p == '\\' && p[1]) p++; // skip escaped char
+                p++;
             }
-        }
-        if (matched) continue;
-
-        // strings
-        if (*p == '"' || *p == '\'') {
-            char quote = *p++;
-            const char *start = p - 1;
-            while (*p && *p != quote) p++;
             if (*p == quote) p++;
-            size_t len = p - start;
-            dst += sprintf(dst, "%s%.*s%s", CLR_STRING, (int)len, start, CLR_RESET);
+            size_t len = (size_t)(p - start);
+            APPEND_CLR(dst, CLR_STRING);
+            memcpy(dst, start, len); dst += len;
+            APPEND_CLR(dst, CLR_RESET);
             continue;
         }
 
-        // numbers
-        if (isdigit((unsigned char)*p)) {
-            const char *start = p;
-            while (isdigit((unsigned char)*p)) p++;
-            size_t len = p - start;
-            dst += sprintf(dst, "%s%.*s%s", CLR_NUMBER, (int)len, start, CLR_RESET);
-            continue;
-        }
-
-        // identifiers
+        // Keywords and identifiers (both start with alpha or _)
         if (isalpha((unsigned char)*p) || *p == '_') {
             const char *start = p;
             while (isalnum((unsigned char)*p) || *p == '_') p++;
-            size_t len = p - start;
+            int len = (int)(p - start);
 
-            const char *next = p;
-            while (isspace((unsigned char)*next)) next++;
+            char prev = (start > line) ? start[-1] : '\0';
+            char next = *p;
 
-            if (*next == '(') {
-                // function call
-                dst += sprintf(dst, "%s%.*s%s", CLR_FUNCTION, (int)len, start, CLR_RESET);
-            } else if (*next == '.') {
-                // check for known object (fs, net, crypto, etc.)
-                int is_known = 0;
-                for (int i = 0; js_objects[i]; i++) {
-                    if (len == strlen(js_objects[i]) &&
-                        strncmp(start, js_objects[i], len) == 0) {
-                        is_known = 1;
+            // Property access (foo.bar): the identifier after '.' is never a keyword
+            int is_prop = (prev == '.');
+            int word_start = !is_prop &&
+                (prev == '\0' || (!isalnum((unsigned char)prev) && prev != '_'));
+            int word_end = (next == '\0' || (!isalnum((unsigned char)next) && next != '_'));
+
+            int colored = 0;
+
+            // Keyword: must be a full word and not after '.'
+            if (word_start && word_end) {
+                for (int i = 0; js_keywords[i].word; i++) {
+                    if (len == js_keywords[i].len &&
+                        memcmp(start, js_keywords[i].word, len) == 0) {
+                        APPEND_CLR(dst, CLR_KEYWORD);
+                        memcpy(dst, start, len); dst += len;
+                        APPEND_CLR(dst, CLR_RESET);
+                        colored = 1;
                         break;
                     }
                 }
-                if (is_known)
-                    dst += sprintf(dst, "%s%.*s%s", CLR_OBJECT, (int)len, start, CLR_RESET);
-                else
-                    dst += sprintf(dst, "%.*s", (int)len, start);
-            } else {
-                // plain identifier
-                dst += sprintf(dst, "%.*s", (int)len, start);
+            }
+
+            if (!colored) {
+                const char *look = p;
+                while (isspace((unsigned char)*look)) look++;
+
+                if (*look == '.') {
+                    // Known object?
+                    for (int i = 0; js_objects[i].word; i++) {
+                        if (len == js_objects[i].len &&
+                            memcmp(start, js_objects[i].word, len) == 0) {
+                            APPEND_CLR(dst, CLR_OBJECT);
+                            memcpy(dst, start, len); dst += len;
+                            APPEND_CLR(dst, CLR_RESET);
+                            colored = 1;
+                            break;
+                        }
+                    }
+                } else if (*look == '(') {
+                    // Function call
+                    APPEND_CLR(dst, CLR_FUNCTION);
+                    memcpy(dst, start, len); dst += len;
+                    APPEND_CLR(dst, CLR_RESET);
+                    colored = 1;
+                }
+            }
+
+            if (!colored) {
+                memcpy(dst, start, len); dst += len;
             }
             continue;
         }
 
-        // default single char
+        // Numbers: integer, float (3.14), hex (0xFF), scientific (1e10)
+        if (isdigit((unsigned char)*p) ||
+            (*p == '.' && isdigit((unsigned char)p[1]))) {
+            const char *start = p;
+            if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+                p += 2;
+                while (isxdigit((unsigned char)*p)) p++;
+            } else {
+                while (isdigit((unsigned char)*p)) p++;
+                if (*p == '.') { p++; while (isdigit((unsigned char)*p)) p++; }
+                if (*p == 'e' || *p == 'E') {
+                    p++;
+                    if (*p == '+' || *p == '-') p++;
+                    while (isdigit((unsigned char)*p)) p++;
+                }
+            }
+            size_t len = (size_t)(p - start);
+            APPEND_CLR(dst, CLR_NUMBER);
+            memcpy(dst, start, len); dst += len;
+            APPEND_CLR(dst, CLR_RESET);
+            continue;
+        }
+
+        // Default: pass character through unchanged
         *dst++ = *p++;
     }
 

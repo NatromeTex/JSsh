@@ -304,7 +304,6 @@ int verify_knownhost(ssh_session session)
     char buf[10];
     char *hexa;
     char *p;
-    int cmp;
     int rc;
  
     rc = ssh_get_server_publickey(session, &srv_pubkey);
@@ -314,7 +313,7 @@ int verify_knownhost(ssh_session session)
     }
  
     rc = ssh_get_publickey_hash(srv_pubkey,
-                                SSH_PUBLICKEY_HASH_SHA1,
+                                SSH_PUBLICKEY_HASH_SHA256,
                                 &hash,
                                 &hlen);
     ssh_key_free(srv_pubkey);
@@ -361,9 +360,14 @@ int verify_knownhost(ssh_session session)
             if (p == NULL) {
                 return -1;
             }
- 
-            cmp = strncasecmp(buf, "yes", 3);
-            if (cmp != 0) {
+
+            // Strip trailing newline/whitespace, then require exact "yes"
+            size_t blen = strlen(buf);
+            while (blen > 0 && (buf[blen-1] == '\n' || buf[blen-1] == '\r' ||
+                                 buf[blen-1] == ' '  || buf[blen-1] == '\t'))
+                buf[--blen] = '\0';
+
+            if (strcasecmp(buf, "yes") != 0) {
                 return -1;
             }
  
@@ -936,6 +940,54 @@ JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     return result;
 }
 
+// Establish a connection, verify the host, and authenticate with a password.
+// Returns the authenticated session on success.
+// On failure returns NULL; *out_ret is JS_EXCEPTION if an error was thrown,
+// or JS_UNDEFINED if the user simply declined (e.g. rejected the host key).
+static ssh_session ssh_connect_and_auth(JSContext *ctx,
+                                         struct ssh_param *params,
+                                         const char *disp_user,
+                                         const char *disp_host,
+                                         JSValue *out_ret) {
+    *out_ret = JS_UNDEFINED;
+
+    ssh_session sess = ssh_create_session_from_params(params);
+    if (!sess) {
+        *out_ret = JS_ThrowInternalError(ctx, "SSH session could not be created");
+        return NULL;
+    }
+
+    if (ssh_connect(sess) != SSH_OK) {
+        *out_ret = JS_ThrowInternalError(ctx, "Error connecting to %s:%d: %s",
+                                         disp_host, params->port,
+                                         ssh_get_error(sess));
+        ssh_free(sess);
+        return NULL;
+    }
+
+    if (verify_knownhost(sess) < 0) {
+        // User declined or host key mismatch — treated as silent exit, not an error
+        ssh_disconnect(sess);
+        ssh_free(sess);
+        return NULL;
+    }
+
+    printf("%s@%s's password: ", disp_user, disp_host);
+    char *password = getpass("");
+    int rc = ssh_userauth_password(sess, NULL, password);
+    explicit_bzero(password, strlen(password)); // wipe from getpass's static buffer
+
+    if (rc != SSH_AUTH_SUCCESS) {
+        *out_ret = JS_ThrowInternalError(ctx, "Error authenticating with password: %s",
+                                         ssh_get_error(sess));
+        ssh_disconnect(sess);
+        ssh_free(sess);
+        return NULL;
+    }
+
+    return sess;
+}
+
 //net.ssh()
 JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     if (argc < 1 || !JS_IsString(argv[0])) {
@@ -965,47 +1017,11 @@ JSValue js_ssh(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
            disp_host,
            params->port);
     
-    int rc;
-    char *password;
-
-    ssh_session ssh_sesh = ssh_create_session_from_params(params);
-    if (!ssh_sesh){
+    JSValue conn_err;
+    ssh_session ssh_sesh = ssh_connect_and_auth(ctx, params, disp_user, disp_host, &conn_err);
+    if (!ssh_sesh) {
         ssh_param_free(params);
-        return JS_ThrowInternalError(ctx, "SSH session could not be created");
-    }
-
-    rc = ssh_connect(ssh_sesh);
-    if (rc != SSH_OK){
-        const char *err = ssh_get_error(ssh_sesh);
-        JSValue ex = JS_ThrowInternalError(ctx,
-                                           "Error connecting to %s:%d: %s",
-                                           disp_host,
-                                           params->port,
-                                           err ? err : "unknown error");
-        ssh_free(ssh_sesh);
-        ssh_param_free(params);
-        return ex;
-    }
-
-    if (verify_knownhost(ssh_sesh) < 0){
-        ssh_disconnect(ssh_sesh);
-        ssh_free(ssh_sesh);
-        ssh_param_free(params);
-        return JS_UNDEFINED;
-    }
-
-    printf("%s@%s's password: ", disp_user, disp_host);
-    password = getpass("");
-    rc = ssh_userauth_password(ssh_sesh, NULL, password);
-    if (rc != SSH_AUTH_SUCCESS){
-        const char *err = ssh_get_error(ssh_sesh);
-        JSValue ex = JS_ThrowInternalError(ctx,
-                                           "Error authenticating with password: %s",
-                                           err ? err : "authentication failed");
-        ssh_disconnect(ssh_sesh);
-        ssh_free(ssh_sesh);
-        ssh_param_free(params);
-        return ex;
+        return conn_err;
     }
 
     interactive_shell(ssh_sesh);
@@ -1064,56 +1080,14 @@ JSValue js_scp(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (!disp_user) disp_user = "user";
     const char *disp_host = params->host ? params->host : "(unknown)";
 
-    ssh_session sess = ssh_create_session_from_params(params);
+    JSValue conn_err;
+    ssh_session sess = ssh_connect_and_auth(ctx, params, disp_user, disp_host, &conn_err);
     if (!sess) {
         ssh_param_free(params);
         JS_FreeCString(ctx, local_path);
         JS_FreeCString(ctx, remote_path);
         JS_FreeCString(ctx, direction);
-        return JS_ThrowInternalError(ctx, "SSH session could not be created");
-    }
-
-    int rc = ssh_connect(sess);
-    if (rc != SSH_OK) {
-        const char *err = ssh_get_error(sess);
-        JSValue ex = JS_ThrowInternalError(ctx,
-                                           "Error connecting to %s:%d: %s",
-                                           disp_host,
-                                           params->port,
-                                           err ? err : "unknown error");
-        ssh_free(sess);
-        ssh_param_free(params);
-        JS_FreeCString(ctx, local_path);
-        JS_FreeCString(ctx, remote_path);
-        JS_FreeCString(ctx, direction);
-        return ex;
-    }
-
-    if (verify_knownhost(sess) < 0) {
-        ssh_disconnect(sess);
-        ssh_free(sess);
-        ssh_param_free(params);
-        JS_FreeCString(ctx, local_path);
-        JS_FreeCString(ctx, remote_path);
-        JS_FreeCString(ctx, direction);
-        return JS_UNDEFINED;
-    }
-
-    printf("%s@%s's password: ", disp_user, disp_host);
-    char *password = getpass("");
-    rc = ssh_userauth_password(sess, NULL, password);
-    if (rc != SSH_AUTH_SUCCESS) {
-        const char *err = ssh_get_error(sess);
-        JSValue ex = JS_ThrowInternalError(ctx,
-                                           "Error authenticating with password: %s",
-                                           err ? err : "authentication failed");
-        ssh_disconnect(sess);
-        ssh_free(sess);
-        ssh_param_free(params);
-        JS_FreeCString(ctx, local_path);
-        JS_FreeCString(ctx, remote_path);
-        JS_FreeCString(ctx, direction);
-        return ex;
+        return conn_err;
     }
 
     JS_FreeCString(ctx, direction); // no longer needed
@@ -1141,7 +1115,7 @@ JSValue js_scp(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             return JS_ThrowInternalError(ctx, "Failed to create SFTP session");
         }
 
-        rc = sftp_init(sftp);
+        int rc = sftp_init(sftp);
         if (rc != SSH_OK) {
             const char *err = ssh_get_error(sess);
             sftp_free(sftp);
@@ -1226,7 +1200,7 @@ JSValue js_scp(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             return JS_ThrowInternalError(ctx, "Failed to create SFTP session");
         }
 
-        rc = sftp_init(sftp);
+        int rc = sftp_init(sftp);
         if (rc != SSH_OK) {
             const char *err = ssh_get_error(sess);
             sftp_free(sftp);

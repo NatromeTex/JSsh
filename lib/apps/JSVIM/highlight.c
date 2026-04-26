@@ -578,9 +578,11 @@ static void compile_rules(LanguageHighlighter *hl) {
     }
 }
 
-// Check if position is already covered by a token
-static int position_has_token(Buffer *buf, int line, int col) {
-    for (size_t i = 0; i < buf->token_count; i++) {
+// Check if position is already covered by a token, searching only from tok_start.
+// Callers pass buf->token_count captured before this line's tokens were pushed,
+// so the search is O(tokens on this line) rather than O(all tokens in buffer).
+static int position_has_token(Buffer *buf, size_t tok_start, int line, int col) {
+    for (size_t i = tok_start; i < buf->token_count; i++) {
         SemanticToken *t = &buf->tokens[i];
         if (t->line == line && col >= t->col && col < t->col + t->len)
             return 1;
@@ -589,7 +591,7 @@ static int position_has_token(Buffer *buf, int line, int col) {
 }
 
 // Highlight a single line with regex rules
-static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int *in_block_comment) {
+static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int *in_block_comment, size_t tok_start) {
     if (lineno < 0 || (size_t)lineno >= buf->count)
         return;
     
@@ -623,7 +625,7 @@ static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int
             int start_col = (int)(start - line);
             
             // Skip if inside a string (crude check - position already tokenized)
-            if (position_has_token(buf, lineno, start_col)) {
+            if (position_has_token(buf, tok_start, lineno, start_col)) {
                 start++;
                 continue;
             }
@@ -666,7 +668,7 @@ static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int
             }
             
             // Skip if this position is already covered (e.g., by block comment or higher-priority rule)
-            if (!position_has_token(buf, lineno, col)) {
+            if (!position_has_token(buf, tok_start, lineno, col)) {
                 SemanticToken tok = { lineno, col, len, rule->kind, 0, TOKEN_SOURCE_REGEX };
                 semantic_token_push(buf, &tok);;
             }
@@ -693,10 +695,12 @@ void highlight_buffer(Buffer *buf) {
     // Clear only regex tokens (preserve any LSP tokens)
     semantic_tokens_clear_regex(buf);
     
-    // Highlight all lines
+    // Highlight all lines. tok_start is captured before each line so
+    // position_has_token only searches tokens belonging to the current line.
     int in_block_comment = 0;
     for (size_t i = 0; i < buf->count; i++) {
-        highlight_line(buf, hl, (int)i, &in_block_comment);
+        size_t tok_start = buf->token_count;
+        highlight_line(buf, hl, (int)i, &in_block_comment, tok_start);
     }
 }
 
