@@ -205,6 +205,11 @@ int main(int argc, char **argv) {
             last_maxx = maxx;
         }
 
+/* The optimisations keep getting better as the models do, each new model adds 500 LOC and somehow seem to make the app better. This
+*  app has gotten to the point I sometimes spend the entire day in JSsh and jsvim doing my work because it covers 90% of all
+*  my uses. Some people who saw this project called it an exercise in futility since the entire app is literally written in C and
+*  ncurses, so what is the point in calling it JSsh and jsvim? Even I don't know...
+*/
         int gutter_width = compute_gutter_width(ed.buf.count);
         int col_offset = gutter_width + 2;
         int visible_rows = maxy - 3;
