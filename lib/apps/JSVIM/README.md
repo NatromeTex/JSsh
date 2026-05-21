@@ -45,6 +45,58 @@ JSVIM/
 └── util.c/h      # Common utilities
 ```
 
+## Command Mode
+
+Press `Esc` from insert mode to enter command mode. The status bar shows `-- COMMAND --` and keystrokes are interpreted as below. Pressing `Esc` again (or `Backspace` on an empty command buffer) returns to insert mode.
+
+### Single-key actions (command buffer empty)
+
+These fire immediately, without `Enter`:
+
+| Key | Action |
+|-----|--------|
+| `u` | Undo the last edit group |
+| `r` | Redo |
+| `Esc` | Return to insert mode (only once the file has been created) |
+| `Backspace` | Return to insert mode |
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `↑` | Move cursor up one line |
+| `↓` | Move cursor down one line |
+| `<N>↑` | Type a number first, then `↑`: jump up N lines |
+| `<N>↓` | Type a number first, then `↓`: jump down N lines |
+
+After an arrow-key jump the command buffer is cleared and JSVIM returns to insert mode.
+
+### Ex-style commands (type, then press `Enter`)
+
+| Command | Action |
+|---------|--------|
+| `q` | Quit |
+| `q!` | Force quit (sets the `force_quit` flag; behaves like `q` today) |
+| `w` | Write the current buffer to its filename. Prompts for a filename if none is set, and asks before creating a new file |
+| `wq` | Write and quit |
+| `x` | Synonym for `wq` |
+| `set nu` | Show absolute line numbers in the gutter (default) |
+| `set rel` | Show relative line numbers in the gutter |
+| `autosave` | Enable autosave (writes the buffer 2s after the last keystroke) and persist the setting to `~/.jsvimrc` |
+| `!autosave` | Disable autosave and persist the setting |
+| `go <N>` | Jump to line `N` (1-based); clamps to the last line if `N` exceeds the buffer length |
+
+Anything unrecognised is echoed in the command bar as `Unknown command: ...` and ignored.
+
+### Create-file prompt
+
+When you start JSVIM on a path that doesn't exist yet, the command bar shows `Create <filename>? (Y/n):` and command mode accepts:
+
+| Key | Action |
+|-----|--------|
+| `y` / `Y` / `Enter` | Confirm; create the file and switch to insert mode |
+| `n` / `N` | Abort and quit without creating the file |
+
 ## Configuration
 
 JSVIM can be configured via a `~/.jsvimrc` file in your home directory. This file allows you to customize LSP servers for each language, and also define editor level settings like tab width.

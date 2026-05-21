@@ -538,7 +538,13 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
 
                 // Send didOpen now that connection is established.
                 lsp_notify_did_open(buf);
-                lsp_request_semantic_tokens(buf);
+                // Only request the full-file semantic-token payload on
+                // initial open if the file is small enough that the
+                // resulting JSON parse won't freeze the UI. Larger files
+                // stay on regex-only highlighting.
+                if (buf->count <= LSP_SEMTOK_MAX_LINES) {
+                    lsp_request_semantic_tokens(buf);
+                }
             }
         } else if (msg_id == 100) {
             cJSON *result = cJSON_GetObjectItem(root, "result");
@@ -586,6 +592,9 @@ static void handle_lsp_json_message(Buffer *buf, const char *json_text) {
             
                 semantic_token_push(buf, &token);
             }
+
+            // Sort so semantic_kind_at can binary-search the updated array
+            semantic_tokens_sort(buf);
         }
 
         cJSON_Delete(root);

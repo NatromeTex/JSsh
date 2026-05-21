@@ -578,20 +578,42 @@ static void compile_rules(LanguageHighlighter *hl) {
     }
 }
 
-// Check if position is already covered by a token, searching only from tok_start.
-// Callers pass buf->token_count captured before this line's tokens were pushed,
-// so the search is O(tokens on this line) rather than O(all tokens in buffer).
-static int position_has_token(Buffer *buf, size_t tok_start, int line, int col) {
-    for (size_t i = tok_start; i < buf->token_count; i++) {
+// Binary search within the LSP-only portion of the token array (indices 0..lsp_count-1,
+// which are sorted by line since LSP responses are delta-encoded in order) to find the
+// first index where token.line >= target_line.
+static size_t lsp_line_start(Buffer *buf, size_t lsp_count, int target_line) {
+    size_t lo = 0, hi = lsp_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (buf->tokens[mid].line < target_line) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+// Check if (line, col) is already covered by:
+//   • LSP tokens for this line: [lsp_ls, lsp_count) where token.line == line
+//   • Regex tokens pushed for this line so far: [regex_start, token_count)
+// This correctly prevents regex tokens from overlapping LSP tokens.
+static int position_has_token(Buffer *buf,
+                               size_t lsp_ls, size_t lsp_count,
+                               size_t regex_start,
+                               int line, int col) {
+    for (size_t i = lsp_ls; i < lsp_count && buf->tokens[i].line == line; i++) {
         SemanticToken *t = &buf->tokens[i];
-        if (t->line == line && col >= t->col && col < t->col + t->len)
-            return 1;
+        if (col >= t->col && col < t->col + t->len) return 1;
+    }
+    for (size_t i = regex_start; i < buf->token_count; i++) {
+        SemanticToken *t = &buf->tokens[i];
+        if (col >= t->col && col < t->col + t->len) return 1;
     }
     return 0;
 }
 
 // Highlight a single line with regex rules
-static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int *in_block_comment, size_t tok_start) {
+static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno,
+                           int *in_block_comment,
+                           size_t lsp_ls, size_t lsp_count, size_t regex_start) {
     if (lineno < 0 || (size_t)lineno >= buf->count)
         return;
     
@@ -625,7 +647,7 @@ static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int
             int start_col = (int)(start - line);
             
             // Skip if inside a string (crude check - position already tokenized)
-            if (position_has_token(buf, tok_start, lineno, start_col)) {
+            if (position_has_token(buf, lsp_ls, lsp_count, regex_start, lineno, start_col)) {
                 start++;
                 continue;
             }
@@ -668,7 +690,7 @@ static void highlight_line(Buffer *buf, LanguageHighlighter *hl, int lineno, int
             }
             
             // Skip if this position is already covered (e.g., by block comment or higher-priority rule)
-            if (!position_has_token(buf, tok_start, lineno, col)) {
+            if (!position_has_token(buf, lsp_ls, lsp_count, regex_start, lineno, col)) {
                 SemanticToken tok = { lineno, col, len, rule->kind, 0, TOKEN_SOURCE_REGEX };
                 semantic_token_push(buf, &tok);;
             }
@@ -695,13 +717,24 @@ void highlight_buffer(Buffer *buf) {
     // Clear only regex tokens (preserve any LSP tokens)
     semantic_tokens_clear_regex(buf);
     
-    // Highlight all lines. tok_start is captured before each line so
-    // position_has_token only searches tokens belonging to the current line.
+    // After clearing regex tokens, only LSP tokens remain.
+    // They arrive delta-encoded (line order) from clangd, so they're already sorted.
+    size_t lsp_count = buf->token_count;
+
+    // Highlight all lines. For each line:
+    //   lsp_ls      = first LSP token on this line (binary search, O(log lsp_count))
+    //   regex_start = first regex token pushed for this line (captured before the call)
+    // position_has_token checks both ranges, keeping O(tokens_on_line) cost while
+    // correctly preventing regex tokens from overlapping LSP tokens.
     int in_block_comment = 0;
     for (size_t i = 0; i < buf->count; i++) {
-        size_t tok_start = buf->token_count;
-        highlight_line(buf, hl, (int)i, &in_block_comment, tok_start);
+        size_t ls  = lsp_line_start(buf, lsp_count, (int)i);
+        size_t rs  = buf->token_count;
+        highlight_line(buf, hl, (int)i, &in_block_comment, ls, lsp_count, rs);
     }
+
+    // Sort combined token array so semantic_kind_at can use binary search.
+    semantic_tokens_sort(buf);
 }
 
 void highlight_cleanup(void) {
@@ -786,21 +819,39 @@ int color_for_semantic_kind(SemanticKind kind) {
     }
 }
 
-SemanticKind semantic_kind_at(Buffer *buf, int line, int col) {
-    SemanticKind regex_kind = SEM_NONE;
-    
-    for (size_t i = 0; i < buf->token_count; i++) {
-        SemanticToken *t = &buf->tokens[i];
-        if (t->line != line)
-            continue;
+static int token_cmp(const void *a, const void *b) {
+    const SemanticToken *ta = (const SemanticToken *)a;
+    const SemanticToken *tb = (const SemanticToken *)b;
+    if (ta->line != tb->line) return ta->line - tb->line;
+    if (ta->col  != tb->col)  return ta->col  - tb->col;
+    // LSP before regex for the same position so the render sweep finds LSP first
+    return (tb->source == TOKEN_SOURCE_LSP) - (ta->source == TOKEN_SOURCE_LSP);
+}
 
+void semantic_tokens_sort(Buffer *buf) {
+    if (buf && buf->token_count > 1)
+        qsort(buf->tokens, buf->token_count, sizeof(SemanticToken), token_cmp);
+}
+
+// Binary search for first token on `line`, then scan that line.
+// O(log total_tokens + tokens_on_line) instead of O(total_tokens).
+// Requires tokens to be sorted — call semantic_tokens_sort after any batch update.
+SemanticKind semantic_kind_at(Buffer *buf, int line, int col) {
+    if (!buf || buf->token_count == 0) return SEM_NONE;
+
+    size_t lo = 0, hi = buf->token_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (buf->tokens[mid].line < line) lo = mid + 1;
+        else hi = mid;
+    }
+
+    SemanticKind regex_kind = SEM_NONE;
+    for (size_t i = lo; i < buf->token_count && buf->tokens[i].line == line; i++) {
+        SemanticToken *t = &buf->tokens[i];
         if (col >= t->col && col < t->col + t->len) {
-            // LSP tokens take priority - return immediately
-            if (t->source == TOKEN_SOURCE_LSP)
-                return t->kind;
-            // Remember regex match as fallback
-            if (regex_kind == SEM_NONE)
-                regex_kind = t->kind;
+            if (t->source == TOKEN_SOURCE_LSP) return t->kind;
+            if (regex_kind == SEM_NONE) regex_kind = t->kind;
         }
     }
     return regex_kind;

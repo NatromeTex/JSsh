@@ -184,6 +184,7 @@ int main(int argc, char **argv) {
 
     while (!ed.quit) {
         editor_process_lsp(&ed);
+        editor_flush_lsp(&ed);
 
         getmaxyx(stdscr, maxy, maxx);
 

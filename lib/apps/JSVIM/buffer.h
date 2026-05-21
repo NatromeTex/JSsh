@@ -42,7 +42,8 @@ typedef struct {
     // LSP document tracking
     int lsp_version;        // last version sent to LSP
     int lsp_opened;         // didOpen was sent successfully
-    int lsp_dirty;          // buffer changed since last sync
+    int lsp_dirty;          // buffer changed, LSP send still pending
+    long long lsp_last_edit_ms; // wall-clock of last edit; used to debounce LSP sends
     char lsp_uri[4096];     // URI used in LSP textDocument
     char filepath[1024];    // filename as opened in jsvim
 

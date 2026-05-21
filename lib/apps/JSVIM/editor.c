@@ -18,6 +18,12 @@
 #define JSVIM_CONFIG_FILE ".jsvimrc"
 #define DEFAULT_TAB_WIDTH 4
 
+// Wait this long after the last keystroke before shipping a fresh
+// didChange + semantic-tokens request to the LSP server. Keeps fast typing
+// from queuing many full-file syncs back-to-back.
+#define LSP_DEBOUNCE_MS 400
+// LSP_SEMTOK_MAX_LINES is defined in lsp.h and shared with the init handler.
+
 // Static indent string buffer for tab/spaces
 static char s_indent_str[32] = "    ";  // default 4 spaces
 
@@ -1038,17 +1044,14 @@ void editor_handle_insert_mode(EditorState *ed, int ch, int visible_rows) {
         break;
     }
 
-    // If the buffer changed, re-highlight
+    // If the buffer changed, re-highlight regex tokens now (cheap, immediate
+    // feedback). LSP didChange + semantic-tokens are deferred to
+    // editor_flush_lsp() so rapid typing doesn't stall the UI by repeatedly
+    // shipping the whole file and parsing multi-MB token responses.
     if (buf->lsp_dirty) {
-        // Always do regex highlighting first (basic syntax)
         highlight_buffer(buf);
-        
-        // If LSP is active, also request semantic tokens (layered on top)
-        if ((buf->ft == FT_C || buf->ft == FT_CPP) && buf->lsp.pid > 0) {
-            lsp_notify_did_change(buf);
-            lsp_request_semantic_tokens(buf);
-        }
-        buf->lsp_dirty = 0;
+        buf->lsp_last_edit_ms = now_ms();
+        // lsp_dirty stays set; editor_flush_lsp() clears it after sending.
     }
 }
 
@@ -1274,17 +1277,45 @@ void editor_handle_command_mode(EditorState *ed, int ch, WINDOW *cmd_win, int ma
 
 void editor_process_lsp(EditorState *ed) {
     Buffer *buf = &ed->buf;
-    
+
     if (buf->lsp.stdout_fd != -1) {
         char temp[4096];
         ssize_t n = read(buf->lsp.stdout_fd, temp, sizeof(temp));
         if (n > 0) {
             lsp_append_data(&buf->lsp, temp, (size_t)n);
 
-            int r;
-            while ((r = try_parse_lsp_message(buf)) == 1) {
-                // keep parsing messages
-            }
+            // Parse at most one message per frame. A single completed
+            // semantic-tokens payload can be multiple MB of JSON; doing the
+            // cJSON_Parse for several queued messages in a single tick is
+            // what makes the editor feel hung on big files. Remaining
+            // messages stay in the accumulator and get parsed next frame.
+            try_parse_lsp_message(buf);
         }
     }
+}
+
+void editor_flush_lsp(EditorState *ed) {
+    Buffer *buf = &ed->buf;
+    if (!buf->lsp_dirty) return;
+
+    // No LSP attached, or filetype that doesn't use semantic tokens —
+    // nothing to flush. Clear the flag so we don't keep checking.
+    if (buf->lsp.pid <= 0 || (buf->ft != FT_C && buf->ft != FT_CPP)) {
+        buf->lsp_dirty = 0;
+        return;
+    }
+
+    // File too large for full-file semantic tokens. Regex highlighting
+    // already ran in editor_handle_insert_mode; that's all this file gets.
+    if (buf->count > LSP_SEMTOK_MAX_LINES) {
+        buf->lsp_dirty = 0;
+        return;
+    }
+
+    // Hold off until typing has paused long enough.
+    if (now_ms() - buf->lsp_last_edit_ms < LSP_DEBOUNCE_MS) return;
+
+    lsp_notify_did_change(buf);
+    lsp_request_semantic_tokens(buf);
+    buf->lsp_dirty = 0;
 }

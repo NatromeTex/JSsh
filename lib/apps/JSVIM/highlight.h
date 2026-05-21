@@ -66,10 +66,15 @@ void semantic_tokens_clear_lsp(Buffer *buf);
 // Push a semantic token to buffer
 void semantic_token_push(Buffer *buf, const SemanticToken *tok);
 
+// Sort tokens by (line, col) so binary search and sweep rendering work correctly.
+// Must be called after highlight_buffer() and after LSP token updates.
+void semantic_tokens_sort(Buffer *buf);
+
 // Map semantic kind to ncurses color pair
 int color_for_semantic_kind(SemanticKind kind);
 
-// Get SemanticKind at given line/column (prefers LSP over regex)
+// Get SemanticKind at given line/column (prefers LSP over regex).
+// Requires tokens to be sorted (call semantic_tokens_sort first).
 SemanticKind semantic_kind_at(Buffer *buf, int line, int col);
 
 #endif

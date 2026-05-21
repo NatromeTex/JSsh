@@ -108,4 +108,8 @@ void editor_handle_command_mode(EditorState *ed, int ch,
 // Process LSP input (non-blocking read)
 void editor_process_lsp(EditorState *ed);
 
+// Flush a pending LSP didChange + semantic-tokens request if the debounce
+// window has elapsed. Cheap to call every main-loop iteration.
+void editor_flush_lsp(EditorState *ed);
+
 #endif

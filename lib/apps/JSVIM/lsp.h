@@ -5,6 +5,12 @@
 #include "buffer.h"
 #include "language.h"
 
+// Skip full-file semantic-token requests for files larger than this.
+// clangd's response scales with token count and the JSON parse dominates
+// per-frame cost — letting it fire on large headers (think quickjs.h)
+// freezes the editor for seconds while the response is parsed.
+#define LSP_SEMTOK_MAX_LINES 3000
+
 // LSP process commands
 typedef struct {
     const char *argv[8];  // NULL-terminated

@@ -33,6 +33,7 @@ void buf_init(Buffer *b) {
     b->lsp_version = 0;
     b->lsp_opened = 0;
     b->lsp_dirty = 0;
+    b->lsp_last_edit_ms = 0;
     b->lsp_uri[0] = '\0';
     b->filepath[0] = '\0';
 

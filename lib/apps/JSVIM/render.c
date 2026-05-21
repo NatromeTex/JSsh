@@ -230,39 +230,18 @@ void render_main_window(WINDOW *main_win, Buffer *buf,
             wattroff(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
         }
 
+        // No wrap: render at most one screen row per buffer line and
+        // truncate anything past the right edge. This keeps cursor math
+        // O(1) (see compute_cursor_position) and removes a per-character
+        // branch from the hot loop.
         int col = col_offset;
         const char *p = buf->lines[lineno];
-        size_t ip = 0;
-        while (p[ip] && row < maxy - 2) {
-            if (col >= maxx - 1) {
-                // wrap
-                row++;
-                if (row >= maxy - 2) break;
-                if (is_cursor_line) {
-                    wattron(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
-                    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_TEXT));
-                } else if (diag_severity == 1) {
-                    wattron(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
-                    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_ERROR));
-                } else if (diag_severity == 2) {
-                    wattron(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
-                    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_WARNING));
-                } else {
-                    wattron(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
-                    mvwprintw(main_win, row, 1, "%*zu", gutter_width, display_num);
-                    wattroff(main_win, COLOR_PAIR(COLOR_PAIR_GUTTER));
-                }
-                col = col_offset;
-            }
-            if (row >= maxy - 2) break;
+        for (size_t ip = 0; p[ip] && col < maxx - 1; ip++) {
             SemanticKind sk = semantic_kind_at(buf, (int)lineno, (int)ip);
             int sy = color_for_semantic_kind(sk);
             if (sy)
                 wattron(main_win, COLOR_PAIR(sy));
-            mvwaddch(main_win, row, col++, p[ip++]);
+            mvwaddch(main_win, row, col++, p[ip]);
             if (sy)
                 wattroff(main_win, COLOR_PAIR(sy));
         }
@@ -336,70 +315,30 @@ void render_command_window(WINDOW *cmd_win, Buffer *buf,
     }
 }
 
-// Walk lines from the start and return the line number whose cumulative visual
-// row count first reaches or exceeds target_row. Used for scroll adjustment.
-// accum_mode=0: stop when accum > target (scroll-up); =1: stop when accum >= target (scroll-down).
-static size_t row_to_line(Buffer *buf, int target_row, int col_offset, int maxx, int accum_mode) {
-    int accum = 0;
-    size_t result = 0;
-    for (size_t ln = 0; ln < buf->count; ln++) {
-        const char *s = buf->lines[ln];
-        int col = col_offset;
-        for (size_t i = 0; s[i]; i++) {
-            if (col >= maxx - 1) { accum++; col = col_offset; }
-            col++;
-        }
-        accum++;
-        if (accum_mode == 0) {
-            if (accum > target_row) break;
-            result = ln + 1;
-        } else {
-            if (accum >= target_row) { result = ln; break; }
-            result = ln + 1;
-        }
-    }
-    return result;
-}
-
 void compute_cursor_position(Buffer *buf, size_t cursor_line, size_t cursor_col,
                             int col_offset, int maxx, int visible_rows,
                             size_t *scroll_y, int *cy, int *cx) {
-    int rows_before_cursor = 0;
-    int cursor_screen_col = col_offset;
+    // No line wrapping: each buffer line maps to exactly one screen row, so
+    // cursor position is pure arithmetic — O(1) instead of the previous
+    // O(cursor_line · avg_line_len) walk from line 0 that made fast scrolling
+    // on large files (e.g. quickjs.h) freeze the input loop.
+    if (visible_rows < 1) visible_rows = 1;
 
-    // Count visual rows before cursor_line
-    for (size_t ln = 0; ln < cursor_line; ln++) {
-        const char *s = buf->lines[ln];
-        int col = col_offset;
-        for (size_t i = 0; s[i]; i++) {
-            if (col >= maxx - 1) { rows_before_cursor++; col = col_offset; }
-            col++;
-        }
-        rows_before_cursor++;
+    // Keep cursor inside the visible window by sliding scroll_y.
+    if (cursor_line < *scroll_y) {
+        *scroll_y = cursor_line;
+    } else if (cursor_line >= *scroll_y + (size_t)visible_rows) {
+        *scroll_y = cursor_line - (size_t)(visible_rows - 1);
     }
 
-    // Count visual columns within cursor_line up to cursor_col
-    {
-        const char *s = buf->lines[cursor_line];
-        int col = col_offset;
-        for (size_t i = 0; s[i] && i < cursor_col; i++) {
-            if (col >= maxx - 1) { rows_before_cursor++; col = col_offset; }
-            col++;
-        }
-        cursor_screen_col = col;
-    }
+    *cy = (int)(cursor_line - *scroll_y) + 1;
+    if (*cy < 1) *cy = 1;
+    if (*cy > visible_rows) *cy = visible_rows;
 
-    *cy = rows_before_cursor - (int)*scroll_y + 1;
-
-    if (*cy < 1) {
-        *scroll_y = row_to_line(buf, rows_before_cursor, col_offset, maxx, 0);
-        *cy = 1;
-    } else if (*cy > visible_rows) {
-        *scroll_y = row_to_line(buf, rows_before_cursor - visible_rows + 1, col_offset, maxx, 1);
-        *cy = visible_rows;
-    }
-
-    *cx = cursor_screen_col;
+    // Horizontal position: clamp to the visible text area. Lines longer than
+    // the window are truncated at render time (we don't sidescroll yet), so
+    // the cursor sits on the last visible column when past the edge.
+    *cx = col_offset + (int)cursor_col;
     if (*cx < col_offset) *cx = col_offset;
     if (*cx > maxx - 2) *cx = maxx - 2;
 
