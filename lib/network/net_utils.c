@@ -17,7 +17,20 @@
 #include <libssh/sftp.h>
 #include <netinet/ip_icmp.h>
 #include <fcntl.h>
+#ifdef MACOS
+#include <net/if_dl.h>
+#include <ifaddrs.h>
+#endif
 #include "quickjs.h"
+
+#ifdef MACOS
+static void secure_zero(void *buf, size_t len) {
+    volatile unsigned char *p = buf;
+    while (len--) *p++ = 0;
+}
+#else
+#define secure_zero explicit_bzero
+#endif
 
 #define PACKET_SIZE 64
 #define PING_COUNT 4
@@ -547,15 +560,25 @@ JSValue js_net_ping(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
 
 // net.netstat()
 JSValue js_net_netstat(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    char result[32768];
+    result[0] = '\0';
+
+#ifdef MACOS
+    FILE *f = popen("netstat -an -p tcp 2>/dev/null && netstat -an -p udp 2>/dev/null", "r");
+    if (!f) return JS_NewString(ctx, result);
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        strncat(result, line, sizeof(result) - strlen(result) - 1);
+    }
+    pclose(f);
+    return JS_NewString(ctx, result);
+#else
     const char *files[][2] = {
         {"/proc/net/tcp",  "tcp"},
         {"/proc/net/udp",  "udp"},
         {"/proc/net/tcp6", "tcp6"},
         {"/proc/net/udp6", "udp6"},
     };
-
-    char result[32768];
-    result[0] = '\0';
 
     for (int fidx = 0; fidx < 4; fidx++) {
         FILE *f = fopen(files[fidx][0], "r");
@@ -621,6 +644,7 @@ JSValue js_net_netstat(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
 
     return JS_NewString(ctx, result);
+#endif
 }
 
 //net.ifconfig()
@@ -702,9 +726,13 @@ JSValue js_ifconfig(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
             snprintf(ip, sizeof(ip), "%s", inet_ntoa(sa->sin_addr));
         }
 
-        // Netmask
+        // Netmask — macOS returns it in ifr_addr, Linux in ifr_netmask
         if (ioctl(fd, SIOCGIFNETMASK, &ifdata) == 0) {
+#ifdef MACOS
+            sa = (struct sockaddr_in*)&ifdata.ifr_addr;
+#else
             sa = (struct sockaddr_in*)&ifdata.ifr_netmask;
+#endif
             snprintf(netmask, sizeof(netmask), "%s", inet_ntoa(sa->sin_addr));
         }
 
@@ -715,10 +743,29 @@ JSValue js_ifconfig(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
         }
 
         // MAC address
+#ifdef MACOS
+        {
+            struct ifaddrs *ifap, *ifa;
+            if (getifaddrs(&ifap) == 0) {
+                for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+                    if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_LINK &&
+                        strcmp(ifa->ifa_name, ifr[i].ifr_name) == 0) {
+                        struct sockaddr_dl *sdl = (struct sockaddr_dl*)ifa->ifa_addr;
+                        unsigned char *hw = (unsigned char*)LLADDR(sdl);
+                        snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+                                 hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+                        break;
+                    }
+                }
+                freeifaddrs(ifap);
+            }
+        }
+#else
         if (ioctl(fd, SIOCGIFHWADDR, &ifdata) == 0) {
             unsigned char *hw = (unsigned char*)ifdata.ifr_hwaddr.sa_data;
             snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
         }
+#endif
 
         // Flags
         if (ioctl(fd, SIOCGIFFLAGS, &ifdata) == 0) {
@@ -862,6 +909,32 @@ JSValue js_tracert(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
 
 //net.route()
 JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+#ifdef MACOS
+    FILE *fp = popen("netstat -rn 2>/dev/null", "r");
+    if (!fp)
+        return JS_ThrowInternalError(ctx, "popen(netstat -rn) failed: %s", strerror(errno));
+    char line[256];
+    size_t outsize = 8192;
+    char *outbuf = malloc(outsize);
+    if (!outbuf) { pclose(fp); return JS_ThrowOutOfMemory(ctx); }
+    size_t outlen = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        size_t linelen = strlen(line);
+        if (outlen + linelen + 1 > outsize) {
+            size_t newsize = outsize * 2;
+            char *newbuf = realloc(outbuf, newsize);
+            if (!newbuf) { free(outbuf); pclose(fp); return JS_ThrowOutOfMemory(ctx); }
+            outbuf = newbuf; outsize = newsize;
+        }
+        memcpy(outbuf + outlen, line, linelen);
+        outlen += linelen;
+    }
+    outbuf[outlen] = '\0';
+    pclose(fp);
+    JSValue result = JS_NewStringLen(ctx, outbuf, outlen);
+    free(outbuf);
+    return result;
+#else
     FILE *fp = fopen("/proc/net/route", "r");
     if (!fp) {
         return JS_ThrowInternalError(ctx, "cannot open /proc/net/route: %s",  strerror(errno));
@@ -936,8 +1009,9 @@ JSValue js_route(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     
     JSValue result = JS_NewStringLen(ctx, outbuf, outlen);
     free(outbuf);
-    
+
     return result;
+#endif
 }
 
 // Establish a connection, verify the host, and authenticate with a password.
@@ -975,7 +1049,7 @@ static ssh_session ssh_connect_and_auth(JSContext *ctx,
     printf("%s@%s's password: ", disp_user, disp_host);
     char *password = getpass("");
     int rc = ssh_userauth_password(sess, NULL, password);
-    explicit_bzero(password, strlen(password)); // wipe from getpass's static buffer
+    secure_zero(password, strlen(password));
 
     if (rc != SSH_AUTH_SUCCESS) {
         *out_ret = JS_ThrowInternalError(ctx, "Error authenticating with password: %s",

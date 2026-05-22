@@ -8,6 +8,7 @@
 #include "sys.h"
 #include "utils.h"
 #include "quickjs.h"
+#include "platform.h"
 
 // ENV file configuration — chaining hash table for O(1) lookup
 
@@ -91,9 +92,7 @@ void env_load(const char *filename) {
             if (sscanf(*p, "%63[^=]=%127[^\n]", key, val) == 2) {
                 if (strcmp(key, "jssh_loc") == 0) {
                     char pathbuf[PATH_MAX];
-                    ssize_t len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf) - 1);
-                    if (len != -1) {
-                        pathbuf[len] = '\0';
+                    if (get_self_exe(pathbuf, sizeof(pathbuf)) == 0) {
                         env_add(key, pathbuf);
                         fprintf(f, "%s=%s\n", key, pathbuf);
                         continue;
@@ -124,9 +123,7 @@ void env_load(const char *filename) {
     const char *stored = env_get("jssh_loc", NULL);
     if (stored) {
         char pathbuf[PATH_MAX];
-        ssize_t len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf) - 1);
-        if (len != -1) {
-            pathbuf[len] = '\0';
+        if (get_self_exe(pathbuf, sizeof(pathbuf)) == 0) {
             if (strcmp(stored, pathbuf) != 0) {
                 env_add("jssh_loc", pathbuf);
 

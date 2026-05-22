@@ -12,7 +12,9 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <limits.h>
+#ifndef MACOS
 #include <linux/limits.h>
+#endif
 
 #define JSVIM_CONFIG_FILE ".jsvimrc"
 #define MAX_LSP_ARGS 8

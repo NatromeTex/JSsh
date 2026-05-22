@@ -1,4 +1,8 @@
+#ifdef MACOS
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>

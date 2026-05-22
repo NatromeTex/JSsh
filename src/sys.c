@@ -1,6 +1,5 @@
 #include <pwd.h>
 #include <ctype.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -18,9 +17,15 @@
 #include <sys/utsname.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <dlfcn.h>
+#ifdef MACOS
+#include <sys/sysctl.h>
+#include <mach/mach.h>
+#endif
 #include "sys.h"
 #include "utils.h"
 #include "quickjs.h"
+#include "platform.h"
 
 #define REGISTER_APP(ctx, global, name, func) JS_SetPropertyStr(ctx, global, name, JS_NewCFunction(ctx, func, name, 0));
 
@@ -329,23 +334,34 @@ static JSValue js_sys_username(JSContext *ctx, JSValueConst this_val, int argc, 
 
 // sys.getcpu()
 static JSValue js_getcpu(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    FILE *f = fopen("/proc/cpuinfo", "r");
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, "unknown"));
     JS_SetPropertyStr(ctx, obj, "cores", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, obj, "threads", JS_NewInt32(ctx, 0));
+
+#ifdef MACOS
+    char brand[256] = {0};
+    size_t brand_len = sizeof(brand);
+    sysctlbyname("machdep.cpu.brand_string", brand, &brand_len, NULL, 0);
+    if (brand[0])
+        JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, brand));
+
+    int cores = 0, threads = 0;
+    size_t sz = sizeof(int);
+    sysctlbyname("hw.physicalcpu", &cores, &sz, NULL, 0);
+    sysctlbyname("hw.logicalcpu",  &threads, &sz, NULL, 0);
+    JS_SetPropertyStr(ctx, obj, "cores",   JS_NewInt32(ctx, cores));
+    JS_SetPropertyStr(ctx, obj, "threads", JS_NewInt32(ctx, threads));
+#else
+    FILE *f = fopen("/proc/cpuinfo", "r");
     if (!f) return obj;
 
     char buf[512];
     char *model = NULL;
     int threads = 0;
-    struct {
-        int phys_id;
-        int core_id;
-    } seen[1024]; // safe for most CPUs
+    struct { int phys_id; int core_id; } seen[1024];
     int seen_count = 0;
-    int cur_phys_id = -1;
-    int cur_core_id = -1;
+    int cur_phys_id = -1, cur_core_id = -1;
     while (fgets(buf, sizeof(buf), f)) {
         if (strncmp(buf, "model name", 10) == 0) {
             if (!model) {
@@ -366,52 +382,77 @@ static JSValue js_getcpu(JSContext *ctx, JSValueConst this_val, int argc, JSValu
                 bool exists = false;
                 for (int i = 0; i < seen_count; i++) {
                     if (seen[i].phys_id == cur_phys_id &&
-                        seen[i].core_id == cur_core_id) {
-                        exists = true;
-                        break;
-                    }
+                        seen[i].core_id == cur_core_id) { exists = true; break; }
                 }
                 if (!exists && seen_count < 1024) {
                     seen[seen_count].phys_id = cur_phys_id;
                     seen[seen_count].core_id = cur_core_id;
                     seen_count++;
                 }
-                cur_phys_id = -1;
-                cur_core_id = -1;
+                cur_phys_id = -1; cur_core_id = -1;
             }
         }
     }
     fclose(f);
-
     JS_SetPropertyStr(ctx, obj, "threads", JS_NewInt32(ctx, threads));
-    JS_SetPropertyStr(ctx, obj, "cores", JS_NewInt32(ctx, seen_count));
+    JS_SetPropertyStr(ctx, obj, "cores",   JS_NewInt32(ctx, seen_count));
+#endif
     return obj;
 }
 
 // sys.getram()
 static JSValue js_getram(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  FILE *f = fopen("/proc/meminfo", "r");
-  if (!f) return JS_NewFloat64(ctx, -1);
-  char key[64];
-  long value;
-  char unit[32];
-  while (fscanf(f, "%63s %ld %31s\n", key, &value, unit) == 3) {
-    if (strcmp(key, "MemTotal:") == 0) {
-      fclose(f);
-      return JS_NewInt32(ctx, (value / 1024.0));
+#ifdef MACOS
+    int64_t memsize = 0;
+    size_t sz = sizeof(memsize);
+    if (sysctlbyname("hw.memsize", &memsize, &sz, NULL, 0) == 0)
+        return JS_NewInt32(ctx, (int)(memsize / (1024 * 1024)));
+    return JS_NewFloat64(ctx, -1);
+#else
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return JS_NewFloat64(ctx, -1);
+    char key[64];
+    long value;
+    char unit[32];
+    while (fscanf(f, "%63s %ld %31s\n", key, &value, unit) == 3) {
+        if (strcmp(key, "MemTotal:") == 0) {
+            fclose(f);
+            return JS_NewInt32(ctx, (int)(value / 1024.0));
+        }
     }
-  }
-  fclose(f);
-  return JS_NewFloat64(ctx, -1);
+    fclose(f);
+    return JS_NewFloat64(ctx, -1);
+#endif
 }
 
 // sys.getgpu() -> { vendor, model }
-// Tries NVIDIA (/proc/driver/nvidia), then AMD/Intel (/sys/class/drm/card0).
 static JSValue js_getgpu(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "vendor", JS_NewString(ctx, "unknown"));
     JS_SetPropertyStr(ctx, obj, "model",  JS_NewString(ctx, "unknown"));
 
+#ifdef MACOS
+    FILE *sp = popen("system_profiler SPDisplaysDataType 2>/dev/null", "r");
+    if (sp) {
+        char line[512];
+        while (fgets(line, sizeof(line), sp)) {
+            char *p = line;
+            while (*p == ' ' || *p == '\t') p++;
+            if (strncmp(p, "Chipset Model:", 14) == 0) {
+                char *v = p + 14;
+                while (*v == ' ') v++;
+                v[strcspn(v, "\n")] = '\0';
+                JS_SetPropertyStr(ctx, obj, "model", JS_NewString(ctx, v));
+            } else if (strncmp(p, "Vendor:", 7) == 0) {
+                char *v = p + 7;
+                while (*v == ' ') v++;
+                v[strcspn(v, "\n")] = '\0';
+                JS_SetPropertyStr(ctx, obj, "vendor", JS_NewString(ctx, v));
+            }
+        }
+        pclose(sp);
+    }
+#else
     // NVIDIA: each GPU has a directory under /proc/driver/nvidia/gpus/
     DIR *nv = opendir("/proc/driver/nvidia/gpus");
     if (nv) {
@@ -435,7 +476,7 @@ static JSValue js_getgpu(JSContext *ctx, JSValueConst this_val, int argc, JSValu
                 }
             }
             fclose(f);
-            break; // only report first GPU
+            break;
         }
         closedir(nv);
         return obj;
@@ -464,19 +505,16 @@ static JSValue js_getgpu(JSContext *ctx, JSValueConst this_val, int argc, JSValu
         }
         fclose(vf);
     }
-
+#endif
     return obj;
 }
 
 // sys.sudo()
 static JSValue js_sudo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    // Get the path to the current executable
     char exe_path[1024];
-    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (len == -1) {
+    if (get_self_exe(exe_path, sizeof(exe_path)) != 0) {
         return JS_ThrowInternalError(ctx, "failed to get executable path");
     }
-    exe_path[len] = '\0';
     
     pid_t pid = fork();
     

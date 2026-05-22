@@ -1,6 +1,23 @@
 CC = cc
-CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.3.0\"
-LDFLAGS = -lm -ldl -lreadline -lncurses -lssh -lgit2
+UNAME := $(shell uname)
+
+ifeq ($(UNAME), Darwin)
+BREW_READLINE := $(shell brew --prefix readline 2>/dev/null)
+BREW_LIBSSH   := $(shell brew --prefix libssh 2>/dev/null)
+BREW_LIBGIT2  := $(shell brew --prefix libgit2 2>/dev/null)
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -DMACOS -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.3.0\" \
+         $(if $(BREW_READLINE),-I$(BREW_READLINE)/include,)
+LDFLAGS_BASE = -lm -lncurses $(if $(BREW_READLINE),-L$(BREW_READLINE)/lib -lreadline,-lreadline)
+LDFLAGS_SSH  = $(if $(BREW_LIBSSH),-L$(BREW_LIBSSH)/lib,) -lssh
+LDFLAGS_GIT  = $(if $(BREW_LIBGIT2),-L$(BREW_LIBGIT2)/lib,) -lgit2
+else
+CFLAGS = -I./src/quickjs -Wall -O2 -DCONFIG_VERSION=\"2020-11-08\" -D_GNU_SOURCE -DLINUX -DJSSH_VERSION=\"0.6.1\" -DJSVIM_VERSION=\"0.3.0\"
+LDFLAGS_BASE = -lm -ldl -lreadline -lncurses
+LDFLAGS_SSH  = -lssh
+LDFLAGS_GIT  = -lgit2
+endif
+
+LDFLAGS = $(LDFLAGS_BASE)
 
 # core sources
 SRC = src/main.c \
@@ -22,8 +39,9 @@ NEED_SETCAP =
 # network module
 ifneq ($(findstring network,$(MODULES)),)
 SRC += lib/network/module.c \
-       lib/network/net_utils.c 
-CFLAGS += -DENABLE_NETWORK
+       lib/network/net_utils.c
+CFLAGS += -DENABLE_NETWORK $(if $(BREW_LIBSSH),-I$(BREW_LIBSSH)/include,)
+LDFLAGS += $(LDFLAGS_SSH)
 NEED_SETCAP = yes
 endif
 
@@ -45,7 +63,8 @@ endif
 ifneq ($(findstring git,$(MODULES)),)
 SRC += lib/git/module.c \
        lib/git/git_utils.c
-CFLAGS += -DENABLE_GIT
+CFLAGS += -DENABLE_GIT $(if $(BREW_LIBGIT2),-I$(BREW_LIBGIT2)/include,)
+LDFLAGS += $(LDFLAGS_GIT)
 endif
 
 # apps module (jsvim)
@@ -68,7 +87,10 @@ SRC += lib/network/module.c \
        lib/git/git_utils.c \
        lib/apps/module.c \
        lib/apps/app_utils.c
-CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS -DENABLE_GIT -DENABLE_APPS
+CFLAGS += -DENABLE_NETWORK -DENABLE_COMPILER -DENABLE_FS -DENABLE_GIT -DENABLE_APPS \
+          $(if $(BREW_LIBSSH),-I$(BREW_LIBSSH)/include,) \
+          $(if $(BREW_LIBGIT2),-I$(BREW_LIBGIT2)/include,)
+LDFLAGS += $(LDFLAGS_SSH) $(LDFLAGS_GIT)
 APPS_ENABLED = yes
 NEED_SETCAP = yes
 endif
@@ -89,8 +111,12 @@ bin/jssh: $(OBJ)
 	@mkdir -p bin
 	$(CC) -o $@ $(OBJ) $(LDFLAGS)
 ifeq ($(NEED_SETCAP),yes)
+ifneq ($(UNAME), Darwin)
 	@echo "Setting cap_net_raw on $@"
 	@sudo setcap cap_net_raw=ep $@
+else
+	@echo "Note: setcap not available on macOS. Run as root for raw socket access."
+endif
 endif
 
 
@@ -109,7 +135,8 @@ JSVIM_SRC = lib/apps/JSVIM/main.c \
 ifeq ($(APPS_ENABLED),yes)
 bin/jsvim: $(JSVIM_SRC)
 	@mkdir -p bin
-	$(CC) $(CFLAGS) -I./lib/apps/JSVIM $(JSVIM_SRC) -lncursesw -o bin/jsvim
+	$(CC) $(CFLAGS) -I./lib/apps/JSVIM $(JSVIM_SRC) \
+	  $(if $(filter Darwin,$(UNAME)),-lncurses,-lncursesw) -o bin/jsvim
 endif
 
 

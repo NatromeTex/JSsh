@@ -9,6 +9,10 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#ifdef MACOS
+#include <sys/param.h>
+#include <sys/mount.h>
+#endif
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "../../src/utils.h"
@@ -17,6 +21,9 @@
 
 // Detect if running under WSL
 static int is_wsl(void) {
+#ifdef MACOS
+    return 0;
+#else
     static int cached = -1;
     if (cached >= 0) return cached;
     FILE *fp = fopen("/proc/version", "r");
@@ -29,6 +36,7 @@ static int is_wsl(void) {
     }
     fclose(fp);
     return cached;
+#endif
 }
 
 // Decode octal escape sequences in /proc/mounts entries
@@ -213,20 +221,57 @@ JSValue js_find(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
 
 // fs.df()
 JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    printf("Filesystem                Size        Used       Avail    Use%%   Mounted on\n");
+
+#ifdef MACOS
+    struct statfs *mounts = NULL;
+    int count = getmntinfo(&mounts, MNT_NOWAIT);
+    if (count <= 0)
+        return JS_ThrowInternalError(ctx, "getmntinfo() failed");
+
+    static const char *skip_fs[] = {
+        "devfs", "autofs", "nullfs", "fdesc", NULL
+    };
+
+    for (int i = 0; i < count; i++) {
+        const char *type = mounts[i].f_fstypename;
+        int skip = 0;
+        for (int j = 0; skip_fs[j]; j++) {
+            if (strcmp(type, skip_fs[j]) == 0) { skip = 1; break; }
+        }
+        if (skip) continue;
+
+        struct statvfs vfs;
+        if (statvfs(mounts[i].f_mntonname, &vfs) != 0) continue;
+
+        unsigned long bs = vfs.f_frsize ? vfs.f_frsize : vfs.f_bsize;
+        double total = (double)vfs.f_blocks * bs;
+        double freeb = (double)vfs.f_bfree  * bs;
+        double avail = (double)vfs.f_bavail * bs;
+        double used  = total - freeb;
+
+        double htotal, hused, havail;
+        const char *utotal = units(total, &htotal);
+        const char *uused  = units(used,  &hused);
+        const char *uavail = units(avail, &havail);
+        double pct = total > 0 ? (used / total) * 100.0 : 0.0;
+
+        printf("%-18s  %6.1f %s  %6.1f %s  %6.1f %s  %5.1f%%  %s\n",
+               mounts[i].f_mntfromname,
+               htotal, utotal, hused, uused, havail, uavail,
+               pct, mounts[i].f_mntonname);
+    }
+#else
     FILE *fp = fopen("/proc/self/mounts", "r");
     if (!fp)
         return JS_ThrowInternalError(ctx, "Failed to open /proc/self/mounts");
 
-    printf("Filesystem                Size        Used       Avail    Use%%   Mounted on\n");
-
     char fs[256], mountpoint[256], type[64], opts[256];
     int dump, pass;
 
-    //Track already-seen mountpoints after normalization 
     char seen[256][256];
     int seen_count = 0;
 
-    //pseudo FS types to ignore 
     static const char *skip_fs[] = {
         "proc", "sysfs", "tmpfs", "devtmpfs", "cgroup", "cgroup2",
         "debugfs", "tracefs", "mqueue", "autofs", "overlay",
@@ -237,35 +282,29 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 
     int i;
 
-    //helper: check if filesystem type is pseudo 
     int is_pseudo_fs(const char *t) {
         for (i = 0; skip_fs[i]; i++)
-            if (strcmp(t, skip_fs[i]) == 0)
-                return 1;
+            if (strcmp(t, skip_fs[i]) == 0) return 1;
         return 0;
     }
 
-    //helper: dedupe mountpoints 
     int seen_mount(const char *mp) {
         int k;
         for (k = 0; k < seen_count; k++)
-            if (strcmp(mp, seen[k]) == 0)
-                return 1;
+            if (strcmp(mp, seen[k]) == 0) return 1;
         strncpy(seen[seen_count], mp, 255);
         seen[seen_count][255] = 0;
         seen_count++;
         return 0;
     }
 
-    // Track already-seen device names for dedup (by underlying device)
     char seen_devs[256][256];
     int seen_dev_count = 0;
 
     int seen_device(const char *dev) {
         int k;
         for (k = 0; k < seen_dev_count; k++)
-            if (strcmp(dev, seen_devs[k]) == 0)
-                return 1;
+            if (strcmp(dev, seen_devs[k]) == 0) return 1;
         if (seen_dev_count < 256) {
             strncpy(seen_devs[seen_dev_count], dev, 255);
             seen_devs[seen_dev_count][255] = 0;
@@ -278,39 +317,24 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 
     while (fscanf(fp, "%255s %255s %63s %255s %d %d",
                   fs, mountpoint, type, opts, &dump, &pass) == 6) {
+        if (is_pseudo_fs(type)) continue;
 
-        //Skip pseudo filesystems 
-        if (is_pseudo_fs(type))
-            continue;
-
-        // Decode octal escapes from /proc/mounts (e.g. C:\134 -> C:\)
         char decoded_fs[256], decoded_mp[256];
         decode_mount_escapes(decoded_fs, fs, sizeof(decoded_fs));
         decode_mount_escapes(decoded_mp, mountpoint, sizeof(decoded_mp));
 
         if (wsl) {
-            // Skip WSL-internal mounts
-            if (strncmp(decoded_mp, "/mnt/wslg", 9) == 0)
-                continue;
-            if (strcmp(decoded_mp, "/init") == 0)
-                continue;
-            // Skip WSL driver/lib pseudo mounts (9p type but not Windows drives)
-            if (strcmp(type, "9p") == 0 &&
-                strncmp(decoded_mp, "/mnt/", 5) != 0)
+            if (strncmp(decoded_mp, "/mnt/wslg", 9) == 0) continue;
+            if (strcmp(decoded_mp, "/init") == 0) continue;
+            if (strcmp(type, "9p") == 0 && strncmp(decoded_mp, "/mnt/", 5) != 0)
                 continue;
         }
 
-        // Deduplicate by mountpoint
-        if (seen_mount(decoded_mp))
-            continue;
-
-        // Deduplicate by device name (e.g. same /dev/sdd at / and /mnt/wslg/distro)
-        if (seen_device(decoded_fs))
-            continue;
+        if (seen_mount(decoded_mp)) continue;
+        if (seen_device(decoded_fs)) continue;
 
         struct statvfs buf;
-        if (statvfs(decoded_mp, &buf) != 0)
-            continue;
+        if (statvfs(decoded_mp, &buf) != 0) continue;
 
         unsigned long bs = buf.f_frsize ? buf.f_frsize : buf.f_bsize;
         double total = (double)buf.f_blocks * bs;
@@ -322,18 +346,14 @@ JSValue js_df(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         const char *utotal = units(total, &htotal);
         const char *uused  = units(used,  &hused);
         const char *uavail = units(avail, &havail);
-
         double pct = total > 0 ? (used / total) * 100.0 : 0.0;
 
         printf("%-18s  %6.1f %s  %6.1f %s  %6.1f %s  %5.1f%%  %s\n",
-               decoded_fs,
-               htotal, utotal,
-               hused,  uused,
-               havail, uavail,
-               pct,
-               decoded_mp);
+               decoded_fs, htotal, utotal, hused, uused, havail, uavail,
+               pct, decoded_mp);
     }
 
     fclose(fp);
+#endif
     return JS_NewString(ctx, JS_SUPPRESS);
 }
